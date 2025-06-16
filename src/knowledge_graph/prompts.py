@@ -2,11 +2,11 @@
 
 # Phase 1: Main extraction prompts
 MAIN_SYSTEM_PROMPT = """
-Role: You are an AI expert in Entity and Relationship Extraction for Knowledge Graph generation.
+Role: You are an AI expert in Entity and Relationship Extraction for Physical Asset Management Knowledge Graph generation.
 
 Responsibilities:
-- Extract meaningful entities from text.
-- Identify relationships (triplets) between entities.
+- Extract meaningful entities from asset management documents.
+- Identify relationships (triplets) between assets, locations, personnel, and maintenance activities.
 - Ensure predicates (relationship names) are extremely concise.
 
 Critical Guidelines:
@@ -16,40 +16,45 @@ Critical Guidelines:
 
 # --- REFINED MAIN_USER_PROMPT (Focused on Core O&G Data) ---
 MAIN_USER_PROMPT = """
-Your critical task: Read the text below (delimited by triple backticks) and identify ALL Subject-Predicate-Object (S-P-O) relationships relevant to the **Oil & Gas subsurface data management domain**. For EACH relationship, you MUST identify the TYPE for BOTH the subject and the object. Produce a single JSON array containing objects, where EACH object represents one S-P-O triple and MUST include ALL FIVE of the following keys: "subject", "subject_type", "predicate", "object", and "object_type".
+Your critical task: Read the text below (delimited by triple backticks) and identify ALL Subject-Predicate-Object (S-P-O) relationships relevant to the **Physical Asset Management domain**. For EACH relationship, you MUST identify the TYPE for BOTH the subject and the object. Produce a single JSON array containing objects, where EACH object represents one S-P-O triple and MUST include ALL FIVE of the following keys: "subject", "subject_type", "predicate", "object", and "object_type".
 
 Domain Context:
-The text relates specifically to the **Upstream Oil and Gas industry**, focusing on **subsurface exploration and production (E&P) data management**. This includes concepts like:
-- **Geoscience Data:** Seismic surveys (2D/3D/4D), well logs (LAS, DLIS), geological models, interpretations, core data, fluid samples.
-- **Well Data:** Well headers, trajectories, drilling reports, completion details, production data, well tests.
-- **Reservoir Data:** Reservoir models, simulation results, fluid properties, pressure data (PVT).
-- **Facilities & Equipment:** Platforms, rigs, pipelines, sensors, specific software names (e.g., Petrel, Techlog, ProSource).
-- **Operational Data:** Field operations, drilling campaigns, production allocation, HSE reports.
-- **Entities:** Wells, Fields, Basins, Blocks, Reservoirs, Formations, Companies (Operators, Service Companies), Persons (Geoscientists, Engineers), Locations (Countries, Regions, Coordinates), Dates, Measurements (with units), Projects, Software, Concepts (e.g., Data Quality, Migration, Governance), Processes, Standards.
+The text relates specifically to **Physical Asset Management**, focusing on **equipment tracking, maintenance operations, and facility management**. This includes concepts like:
+- **Asset Data:** Equipment specifications, serial numbers, manufacturer information, installation dates, location assignments, condition status
+- **Maintenance Data:** Work orders, inspection reports, preventive maintenance schedules, corrective actions, parts consumption, labor hours
+- **Location Data:** Facility hierarchies (site → building → floor → room), geographic coordinates, asset placement, storage locations
+- **Personnel Data:** Technicians, operators, inspectors, managers, contractors, certifications, assignments, responsibilities
+- **Operational Data:** Equipment performance, utilization rates, downtime events, efficiency metrics, safety incidents
+- **Supply Chain:** Parts inventory, suppliers, purchase orders, warranties, contracts, delivery schedules
+- **Compliance:** Regulatory requirements, inspection schedules, certifications, safety protocols, environmental compliance
+- **Entities:** Assets (Equipment, Machinery, Systems, Components), Locations (Sites, Buildings, Facilities), Personnel (Technicians, Operators, Managers), Organizations (Manufacturers, Suppliers, Contractors), Documents (Manuals, Reports, Procedures), Parts (Components, Materials, Tools), Measurements (Metrics, Readings, Specifications)
 
 Follow these rules METICULOUSLY:
 
-- **MANDATORY FIELDS:** Every JSON object in the output array MUST contain these exact five keys: `subject`, `subject_type`, `predicate`, `object`, `object_type`. NO EXCEPTIONS. If you cannot determine a specific type, use a reasonable default like "Concept", "Value", or "Identifier", but the key MUST be present.
-- **Entity Consistency:** Use consistent, lowercase names for entities (e.g., "daman formation" not "Daman Fm.", "prosource" not "ProSource"). Apply common abbreviations where standard (e.g., "pvt" for Pressure-Volume-Temperature).
-- **Entity Types:** Identify the type for each subject and object using **Title Case**. Be specific to the O&G domain. Examples:
-    - **Data Types:** `SeismicSurvey`, `WellLog`, `GeologicalModel`, `Interpretation`, `CoreData`, `FluidSample`, `WellTest`, `ProductionData`, `DrillingReport`
-    - **Physical Entities:** `Well`, `Field`, `Basin`, `Block`, `Reservoir`, `Formation`, `Platform`, `Rig`, `Pipeline`
-    - **Organizations/People:** `Company`, `Operator`, `ServiceCompany`, `Person`, `Team`
-    - **Abstract/Other:** `Location`, `Date`, `Measurement`, `Unit`, `Project`, `Software`, `Process`, `Concept`, `Standard` (e.g., OSDU, WITSML), `Identifier`, `Value`
-    - Be specific (e.g., `"2.5 mstb/d"` object_type: `Measurement`, `"osdu"` object_type: `Standard`).
-- **Atomic Terms:** Identify distinct key terms. Break down complex descriptions if possible (e.g., "high-pressure high-temperature well" might yield `(well_name, is_a, high_pressure_well)` and `(well_name, is_a, high_temperature_well)`).
-- **Handle Lists:** If the text mentions a list of items related to a subject (e.g., 'clients including A, B, and C', 'platforms X, Y, Z'), create **separate triples** for each item. Example: `(project, has_client, company_a)`, `(project, has_client, company_b)`, etc.
-- **Quantitative Achievements:** Extract specific metrics and link them to the relevant entity (e.g., `(data workspace, achieved_revenue, $3m)`, `(petronas project, reduced_data_stores_by, >80%)`). Use predicates like `has_value`, `achieved_metric`, `improved_by`, `reduced_by`.
-- **CRITICAL PREDICATE LENGTH:** Predicates MUST be 4-6 words MAXIMUM, ideally 2-3 words. Be concise and use verbs. Examples: `drilled_by`, `located_in`, `has_target`, `uses_software`, `migrated_to`, `achieved_revenue`. Use lowercase with underscores (`snake_case`).
-- **Completeness:** Extract ALL identifiable relationships relevant to the **subsurface E&P data management domain**.
-- **Standardization:** Use consistent terminology (e.g., use "well log" consistently).
+- **MANDATORY FIELDS:** Every JSON object in the output array MUST contain these exact five keys: `subject`, `subject_type`, `predicate`, `object`, `object_type`. NO EXCEPTIONS. If you cannot determine a specific type, use a reasonable default like "Asset", "Location", "Person", or "Document", but the key MUST be present.
+- **Entity Consistency:** Use consistent, lowercase names for entities (e.g., "compressor unit 101" not "Compressor Unit #101", "preventive maintenance" not "PM"). Apply standard abbreviations where appropriate (e.g., "hvac" for Heating, Ventilation, and Air Conditioning).
+- **Entity Types:** Identify the type for each subject and object using **Title Case**. Be specific to the Asset Management domain. Examples:
+    - **Asset Types:** `Equipment`, `Machinery`, `System`, `Component`, `Infrastructure`, `Vehicle`, `Tool`, `Instrument`
+    - **Location Types:** `Site`, `Building`, `Floor`, `Room`, `Area`, `Zone`, `Facility`, `Warehouse`, `Location`
+    - **Personnel Types:** `Technician`, `Operator`, `Inspector`, `Manager`, `Contractor`, `Engineer`, `Supervisor`, `Person`
+    - **Organization Types:** `Manufacturer`, `Supplier`, `ServiceProvider`, `Contractor`, `Operator`, `Company`, `Department`
+    - **Document Types:** `Manual`, `Report`, `Procedure`, `Specification`, `Certificate`, `WorkOrder`, `Invoice`
+    - **Maintenance Types:** `WorkOrder`, `Inspection`, `PreventiveMaintenance`, `CorrectiveMaintenance`, `Schedule`, `Task`
+    - **Part Types:** `Component`, `SparePart`, `Material`, `Consumable`, `Tool`, `Inventory`
+    - **Abstract Types:** `Measurement`, `Specification`, `Condition`, `Status`, `Priority`, `Cost`, `Date`, `Value`
+- **Atomic Terms:** Identify distinct key terms. Break down complex descriptions if possible (e.g., "emergency shutdown system" might yield `(emergency_shutdown_system, is_type_of, safety_system)` and `(emergency_shutdown_system, located_in, control_room)`).
+- **Handle Lists:** If the text mentions a list of items related to a subject (e.g., 'equipment including A, B, and C', 'technicians X, Y, Z assigned'), create **separate triples** for each item. Example: `(facility, contains_equipment, pump_a)`, `(facility, contains_equipment, compressor_b)`, etc.
+- **Quantitative Data:** Extract specific metrics and link them to the relevant entity (e.g., `(pump_101, has_flow_rate, 500_gpm)`, `(motor_a, operating_temperature, 85_celsius)`, `(work_order_123, estimated_hours, 4.5_hours)`). Use predicates like `has_value`, `measures`, `operates_at`, `rated_for`.
+- **CRITICAL PREDICATE LENGTH:** Predicates MUST be 4-6 words MAXIMUM, ideally 2-3 words. Be concise and use verbs. Examples: `located_in`, `manufactured_by`, `maintained_by`, `operates`, `contains`, `assigned_to`, `requires`, `scheduled_for`. Use lowercase with underscores (`snake_case`).
+- **Completeness:** Extract ALL identifiable relationships relevant to the **physical asset management domain**.
+- **Standardization:** Use consistent terminology (e.g., use "preventive maintenance" consistently, not "PM" or "planned maintenance").
 - **Lowercase Values:** ALL text values for `subject`, `predicate`, and `object` MUST be lowercase.
-- **No Special Characters:** Avoid symbols like %, @, “, ”, °, etc., in values. Use plain text equivalents (e.g., "degrees c", "percent").
+- **No Special Characters:** Avoid symbols like %, @, ", ", °, etc., in values. Use plain text equivalents (e.g., "degrees c", "percent", "number").
 
 Important Considerations:
-- Precision in naming (wells, fields, formations) is key.
+- Precision in asset identification (equipment IDs, serial numbers, locations) is key.
 - Maximize graph connectedness via consistent naming and relationship extraction.
-- Consider the full context of the chunk.
+- Consider the full context of maintenance operations and asset lifecycles.
 - **ALL FIVE KEYS (`subject`, `subject_type`, `predicate`, `object`, `object_type`) ARE MANDATORY FOR EVERY TRIPLE.**
 
 Output Requirements:
@@ -61,39 +66,39 @@ Example of the required output structure (Notice all five keys and domain releva
 
 [
   {
-    "subject": "well_a_12",
-    "subject_type": "Well",
-    "predicate": "penetrates_formation",
-    "object": "nahr umr formation",
-    "object_type": "Formation"
+    "subject": "compressor unit 101",
+    "subject_type": "Equipment",
+    "predicate": "located_in",
+    "object": "building a",
+    "object_type": "Building"
   },
   {
-    "subject": "xyz_field",
-    "subject_type": "Field",
-    "predicate": "operated_by",
-    "object": "national oil company",
-    "object_type": "Operator"
+    "subject": "work order wo2024001",
+    "subject_type": "WorkOrder",
+    "predicate": "assigned_to",
+    "object": "technician smith",
+    "object_type": "Technician"
   },
   {
-    "subject": "seismic_survey_2022",
-    "subject_type": "SeismicSurvey",
-    "predicate": "covers_area",
-    "object": "block_7",
-    "object_type": "Block"
+    "subject": "pump motor",
+    "subject_type": "Equipment",
+    "predicate": "manufactured_by",
+    "object": "siemens",
+    "object_type": "Manufacturer"
   },
   {
-    "subject": "prosource",
-    "subject_type": "Software",
-    "predicate": "integrates_with",
-    "object": "delfi data ecosystem",
-    "object_type": "System"
+    "subject": "preventive maintenance pm101",
+    "subject_type": "PreventiveMaintenance",
+    "predicate": "scheduled_for",
+    "object": "march 15 2025",
+    "object_type": "Date"
   },
   {
-    "subject": "data_migration_project",
-    "subject_type": "Project",
-    "predicate": "achieved_metric",
-    "object": ">80% reduction", # Example metric
-    "object_type": "Value"
+    "subject": "temperature sensor",
+    "subject_type": "Instrument",
+    "predicate": "monitors",
+    "object": "boiler temperature",
+    "object_type": "Measurement"
   }
 ]
 
@@ -104,16 +109,24 @@ Text to analyze (between triple backticks):
 
 # Phase 2: Entity standardization prompts
 ENTITY_RESOLUTION_SYSTEM_PROMPT = """
-You are an expert in entity resolution and knowledge representation.
-Your task is to standardize entity names from a knowledge graph to ensure consistency.
+You are an expert in entity resolution and knowledge representation for Physical Asset Management systems.
+Your task is to standardize entity names from an asset management knowledge graph to ensure consistency.
+Focus on assets, equipment, locations, personnel, and maintenance-related entities.
 """
 
 def get_entity_resolution_user_prompt(entity_list):
     return f"""
-Below is a list of entity names extracted from a knowledge graph. 
-Some may refer to the same real-world entities but with different wording.
+Below is a list of entity names extracted from a physical asset management knowledge graph. 
+Some may refer to the same real-world entities but with different wording, abbreviations, or formatting.
 
 Please identify groups of entities that refer to the same concept, and provide a standardized name for each group.
+Focus on:
+- Equipment and asset names (standardize model numbers, serial numbers, naming conventions)
+- Location identifiers (building codes, room numbers, facility names)
+- Personnel names and roles (technician titles, department names)
+- Manufacturer and supplier names
+- Part numbers and component identifiers
+
 Return your answer as a JSON object where the keys are the standardized names and the values are arrays of all variant names that should map to that standard name.
 Only include entities that have multiple variants or need standardization.
 
@@ -129,13 +142,13 @@ Format your response as valid JSON like this:
 
 # Phase 3: Community relationship inference prompts
 RELATIONSHIP_INFERENCE_SYSTEM_PROMPT = """
-You are an expert in knowledge representation and inference. 
-Your task is to infer plausible relationships between disconnected entities in a knowledge graph.
+You are an expert in knowledge representation and inference for Physical Asset Management systems. 
+Your task is to infer plausible relationships between disconnected entities in an asset management knowledge graph.
 """
 
 def get_relationship_inference_user_prompt(entities1, entities2, triples_text):
     return f"""
-I have a knowledge graph with two disconnected communities of entities. 
+I have an asset management knowledge graph with two disconnected communities of entities. 
 
 Community 1 entities: {entities1}
 Community 2 entities: {entities2}
@@ -144,6 +157,13 @@ Here are some existing relationships involving these entities:
 {triples_text}
 
 Please infer 2-3 plausible relationships between entities from Community 1 and entities from Community 2.
+Focus on typical asset management relationships such as:
+- Equipment-location relationships (located_in, installed_at)
+- Maintenance relationships (maintained_by, requires_service)
+- Operational relationships (operates, controls, monitors)
+- Supply chain relationships (supplied_by, manufactured_by)
+- Personnel assignments (assigned_to, supervised_by)
+
 Return your answer as a JSON array of triples in the following format:
 
 [
@@ -161,15 +181,21 @@ For predicates, use short phrases that clearly describe the relationship.
 IMPORTANT: Make sure the subject and object are different entities - avoid self-references.
 """
 
+# Phase 4: Within-community relationship inference prompts (updated for asset management)
+WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT = """
+You are an expert in knowledge representation and inference for Physical Asset Management systems. 
+Your task is to infer plausible relationships between semantically related entities that are not yet connected in an asset management knowledge graph.
+"""
+
 # Phase 4: Within-community relationship inference prompts
 WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT = """
-You are an expert in knowledge representation and inference. 
-Your task is to infer plausible relationships between semantically related entities that are not yet connected in a knowledge graph.
+You are an expert in knowledge representation and inference for Physical Asset Management systems. 
+Your task is to infer plausible relationships between semantically related entities that are not yet connected in an asset management knowledge graph.
 """
 
 def get_within_community_inference_user_prompt(pairs_text, triples_text):
     return f"""
-I have a knowledge graph with several entities that appear to be semantically related but are not directly connected.
+I have an asset management knowledge graph with several entities that appear to be semantically related but are not directly connected.
 
 Here are some pairs of entities that might be related:
 {pairs_text}
@@ -178,6 +204,13 @@ Here are some existing relationships involving these entities:
 {triples_text}
 
 Please infer plausible relationships between these disconnected pairs.
+Focus on typical asset management relationships such as:
+- Asset hierarchies (part_of, contains, composed_of)
+- Maintenance dependencies (depends_on, affects, triggers)
+- Operational relationships (powers, controls, feeds_into)
+- Location relationships (adjacent_to, connects_to, serves)
+- Temporal relationships (precedes, follows, scheduled_after)
+
 Return your answer as a JSON array of triples in the following format:
 
 [

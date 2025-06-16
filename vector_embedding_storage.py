@@ -4,6 +4,8 @@ from pathlib import Path
 import configparser
 import sys
 from typing import List, Dict, Tuple, Set
+import time
+from functools import wraps
 
 # --- Vector DB and Embeddings Libraries ---
 # Ensure you have installed the necessary libraries:
@@ -28,6 +30,24 @@ if not logger.handlers:
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2" # Good default sentence transformer
 CHROMA_PERSIST_PATH = "./chroma_db_embeddings" # Directory to store Chroma data
 COLLECTION_NAME = "doc_pipeline_embeddings"
+
+def monitor_performance(operation_name):
+    """Decorator to monitor operation performance."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                duration = time.time() - start_time
+                logger.info(f"Performance: {operation_name} completed in {duration:.3f}s")
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"Performance: {operation_name} failed after {duration:.3f}s: {e}")
+                raise
+        return wrapper
+    return decorator
 
 def load_unique_chunks_from_json(file_path: Path) -> Dict[str, str]:
     """
@@ -81,6 +101,8 @@ def load_unique_chunks_from_json(file_path: Path) -> Dict[str, str]:
     except Exception as e:
         logger.error("Failed to read or process file %s: %s", file_path, e, exc_info=True)
         return {}
+
+@monitor_performance("create_and_store_embeddings")
 
 def create_and_store_embeddings(
     chunks: Dict[str, str],
@@ -140,10 +162,13 @@ def create_and_store_embeddings(
     chunk_texts = [chunks[id] for id in chunk_ids] # Maintain order
 
     logger.info("Generating embeddings for %d text chunks...", len(chunk_texts))
+    embedding_start = time.time()
     try:
         # Generate embeddings in batches (model.encode handles batching internally)
         embeddings = model.encode(chunk_texts, show_progress_bar=True)
-        logger.info("Embeddings generated successfully.")
+        embedding_duration = time.time() - embedding_start
+        logger.info(
+            f"Performance: Embedding generation completed in {embedding_duration:.3f}s for {len(chunk_texts)} chunks")
 
         # Convert embeddings to list if needed (some versions might return numpy array)
         embeddings_list = embeddings.tolist() if hasattr(embeddings, 'tolist') else list(embeddings)
@@ -153,6 +178,7 @@ def create_and_store_embeddings(
         return
 
     logger.info("Adding %d embeddings to ChromaDB collection '%s'...", len(chunk_ids), collection_name)
+    storage_start = time.time()
     try:
         # Add data to ChromaDB
         # Note: IDs must be strings. Documents are the original texts.
@@ -163,7 +189,8 @@ def create_and_store_embeddings(
             # You could add more metadata here if needed, e.g.,
             # metadatas=[{"source": "doc_x"} for _ in chunk_ids]
         )
-        logger.info("Successfully added embeddings to ChromaDB.")
+        storage_duration = time.time() - storage_start
+        logger.info(f"Performance: ChromaDB storage completed in {storage_duration:.3f}s for {len(chunk_ids)} items")
 
         # Optional: Verify count in collection
         count = collection.count()

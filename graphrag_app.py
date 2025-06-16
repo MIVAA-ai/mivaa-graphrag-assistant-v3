@@ -19,6 +19,7 @@ st.set_page_config(
         layout="wide",
         initial_sidebar_state="expanded" # Keep sidebar open initially
     )
+from enhanced_ocr_pipeline import EnhancedOCRPipeline
 # Use tomli if available (standardized as tomllib)
 try:
     import tomllib
@@ -177,6 +178,25 @@ logger = logging.getLogger(__name__)
 # CHROMA_DEFAULT_PATH = "./chroma_db_pipeline" # Example
 # --- End Constants ---
 
+@st.cache_resource
+def get_enhanced_ocr_pipeline(config):
+    """Initialize the enhanced OCR pipeline with EasyOCR + Mistral"""
+    logger.info("Initializing Enhanced OCR Pipeline...")
+    try:
+        pipeline = EnhancedOCRPipeline(config)
+
+        # Set Mistral client if available
+        mistral_client = get_mistral_client(config.get('MISTRAL_API_KEY'))
+        if mistral_client:
+            pipeline.set_mistral_client(mistral_client)
+
+        logger.info(f"Enhanced OCR Pipeline initialized: "
+                    f"EasyOCR={'✓' if pipeline.easyocr_reader else '✗'}, "
+                    f"Mistral={'✓' if pipeline.mistral_client else '✗'}")
+        return pipeline
+    except Exception as e:
+        logger.error(f"Failed to initialize Enhanced OCR Pipeline: {e}")
+        return None
 
 # --- Configuration Loading Function ---
 @st.cache_data # Cache the loaded configuration dictionary
@@ -220,6 +240,20 @@ def load_config():
             config['INFERENCE_ENABLED'] = config_toml.get("inference", {}).get("enabled", False)
             config['CACHE_ENABLED'] = config_toml.get("caching", {}).get("enabled", True)
             config['DB_NAME'] = config_toml.get("database", {}).get("name", "neo4j")
+
+            # Add OCR configuration section
+            ocr_config = config_toml.get("ocr", {})
+            config['EASYOCR_ENABLED'] = ocr_config.get("easyocr_enabled", True)
+            config['EASYOCR_GPU'] = ocr_config.get("gpu_enabled", True)
+            config['EASYOCR_LANGUAGES'] = ocr_config.get("languages", ["en"])
+            config['OCR_PRIMARY_METHOD'] = ocr_config.get("primary_method", "easyocr")
+            config['OCR_FALLBACK_ENABLED'] = ocr_config.get("fallback_enabled", True)
+            config['OCR_CONFIDENCE_THRESHOLD'] = ocr_config.get("confidence_threshold", 0.5)
+
+            # Override with environment variables
+            config['EASYOCR_ENABLED'] = os.getenv('EASYOCR_ENABLED',
+                                                  str(config.get('EASYOCR_ENABLED', True))).lower() == 'true'
+            config['EASYOCR_GPU'] = os.getenv('EASYOCR_GPU', str(config.get('EASYOCR_GPU', True))).lower() == 'true'
 
             config['standardization'] = config_toml.get("standardization", {})
             config['inference'] = config_toml.get("inference", {})
@@ -363,25 +397,44 @@ def get_embedding_model(model_name):
         return None
 
 @st.cache_resource
+@st.cache_resource
 def get_chroma_collection(chroma_path, collection_name, embedding_model_name):
-    """Connects to ChromaDB, gets/creates collection, returns collection object."""
+    """Enhanced ChromaDB collection with consistent settings."""
     if not all([chroma_path, collection_name, embedding_model_name]):
         logger.error("Missing ChromaDB path, collection name, or embedding model name.")
         return None
-    logger.info(f"Initializing ChromaDB connection at {chroma_path} for collection: {collection_name}")
+
+    logger.info(f"Initializing ChromaDB connection at {chroma_path}")
     try:
         Path(chroma_path).mkdir(parents=True, exist_ok=True)
-        client = chromadb.PersistentClient(path=chroma_path)
-        chroma_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=embedding_model_name)
+
+        # Use consistent settings across all ChromaDB connections
+        settings = chromadb.Settings(
+            anonymized_telemetry=False,
+            allow_reset=False
+        )
+
+        client = chromadb.PersistentClient(
+            path=chroma_path,
+            settings=settings  # Add consistent settings
+        )
+
+        chroma_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=embedding_model_name
+        )
+
         collection = client.get_or_create_collection(
             name=collection_name,
             embedding_function=chroma_ef,
             metadata={"hnsw:space": "cosine"}
         )
-        logger.info(f"ChromaDB collection '{collection_name}' ready. Count: {collection.count()}")
+
+        count = collection.count()
+        logger.info(f"ChromaDB collection '{collection_name}' ready. Count: {count}")
         return collection
+
     except Exception as e:
-        logger.error(f"Failed to initialize/get ChromaDB collection '{collection_name}': {e}", exc_info=True)
+        logger.error(f"Failed to initialize ChromaDB collection '{collection_name}': {e}", exc_info=True)
         return None
 
 @st.cache_resource

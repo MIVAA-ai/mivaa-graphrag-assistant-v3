@@ -7,6 +7,9 @@ from pathlib import Path
 import configparser
 import sys
 import time
+from functools import wraps
+from functools import lru_cache
+import hashlib
 import asyncio
 from src.knowledge_graph.prompts import (
     TEXT_TO_CYPHER_SYSTEM_PROMPT,
@@ -179,8 +182,6 @@ except ImportError:
 
 # Prompts for evaluating and revising Cypher queries with empty results
 
-# --- Prompts for Evaluating Queries with Empty Results ---
-
 EVALUATE_EMPTY_RESULT_SYSTEM_PROMPT = """
 
 You are a meticulous Cypher query analyst. Your objective is to diagnose why a given Cypher query returned zero results when executed against a graph database with the specified schema.
@@ -316,6 +317,27 @@ except ImportError as e:
         def retrieve_fewshots(self, *args, **kwargs): return []
         def store_fewshot_example(self, *args, **kwargs): pass
 
+def monitor_performance(operation_name):
+    """Decorator to monitor operation performance."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                duration = time.time() - start_time
+                logger.info(f"Performance: {operation_name} completed in {duration:.3f}s")
+                return result
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"Performance: {operation_name} failed after {duration:.3f}s: {e}")
+                raise
+        return wrapper
+    return decorator
+
+def get_query_hash(question: str, top_k: int) -> str:
+    """Generate hash for query caching."""
+    return hashlib.md5(f"{question.lower().strip()}_{top_k}".encode()).hexdigest()
 
 # Logger Setup
 logger = logging.getLogger(__name__)
@@ -481,7 +503,15 @@ class GraphRAGQA:
             try:
                 logger.info(f"GraphRAGQA: Initializing ChromaDB client at path: {chroma_path}")
                 Path(chroma_path).mkdir(parents=True, exist_ok=True)
-                self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+                # With this consistent approach:
+                settings = chromadb.Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=False
+                )
+                self.chroma_client = chromadb.PersistentClient(
+                    path=chroma_path,
+                    settings=settings
+                )
                 logger.info("GraphRAGQA: ChromaDB client initialized.")
                 try:
                     logger.info(f"GraphRAGQA: Getting or creating ChromaDB collection: {collection_name}")
@@ -1067,9 +1097,21 @@ class GraphRAGQA:
         logger.info("GraphRAGQA: Cypher query returned %d records.", count)
         return [record.data() for record in records]
 
+    @monitor_performance("vector_search")
+
+    # Add this as a class method in GraphRAGQA:
 
     def _query_vector_db(self, question: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        # ... (implementation remains the same) ...
+        # Add caching logic at the start of your existing method
+        if not hasattr(self, '_query_cache'):
+            self._query_cache = {}
+
+        cache_key = get_query_hash(question, top_k)  # Correct - no self.
+
+        if cache_key in self._query_cache:
+            logger.info("GraphRAGQA: Using cached vector search results")
+            return self._query_cache[cache_key]
+
         if not self.is_vector_search_enabled or not self.embedding_function or not self.chroma_collection:
             logger.warning("GraphRAGQA: Vector search skipped (not enabled or components missing).")
             return []
