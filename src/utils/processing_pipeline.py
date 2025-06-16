@@ -424,6 +424,9 @@ def extract_knowledge_graph(
                                               not isinstance(item[k], str) or not item[k].strip()}
                             if not missing_keys and not invalid_values:
                                 chunk_hash = hashlib.sha256(chunk.encode('utf-8')).hexdigest()
+
+                                # FIX: Actually assign the chunk_id!
+                                item["chunk_id"] = f"chunk_{chunk_hash[:16]}"  # Use first 16 chars of hash
                                 item["chunk_text"] = chunk.strip()
                                 item["predicate"] = limit_predicate_length(item["predicate"])
                                 valid_chunk_triples.append(item)

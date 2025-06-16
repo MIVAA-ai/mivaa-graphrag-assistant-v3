@@ -32,8 +32,11 @@ try:
         WITHIN_COMMUNITY_INFERENCE_SYSTEM_PROMPT,
         get_within_community_inference_user_prompt
     )
+    # Test LLM availability
+    llm_features_available = True
 except ImportError as e:
      logger.error(f"Failed to import LLM/prompt modules in entity_standardization: {e}. LLM-based features might fail.")
+     llm_features_available = False
      # Define dummy functions if imports fail to prevent NameErrors,
      # but log a critical warning.
      def call_llm(*args, **kwargs):
@@ -49,6 +52,87 @@ except ImportError as e:
      def get_entity_resolution_user_prompt(*args): return "get_entity_resolution_user_prompt_MISSING"
      def get_relationship_inference_user_prompt(*args): return "get_relationship_inference_user_prompt_MISSING"
      def get_within_community_inference_user_prompt(*args): return "get_within_community_inference_user_prompt_MISSING"
+
+
+# Define allowed cross-type relationships
+ALLOWED_CROSS_TYPE_RELATIONSHIPS = {
+    # Invoice relationships
+    ('Invoice', 'Date'): True,
+    ('Invoice', 'Company'): True,
+    ('Invoice', 'Currency'): True,
+    ('Invoice', 'Value'): True,
+
+    # Activity relationships
+    ('Activity', 'Date'): True,
+    ('Activity', 'Equipment'): True,
+    ('Activity', 'Asset'): True,
+    ('Activity', 'Person'): True,
+    ('Activity', 'Material'): True,
+
+    # Equipment relationships
+    ('Equipment', 'Activity'): True,
+    ('Equipment', 'Asset'): True,
+    ('Equipment', 'Location'): True,
+
+    # Asset relationships
+    ('Asset', 'Activity'): True,
+    ('Asset', 'Location'): True,
+    ('Asset', 'Material'): True,
+
+    # Company relationships
+    ('Company', 'Location'): True,
+    ('Company', 'Invoice'): True,
+    ('Company', 'Contract'): True,
+
+    # Task relationships
+    ('Task', 'Date'): True,
+    ('Task', 'Equipment'): True,
+    ('Task', 'Description'): True,
+    ('Task', 'Value'): True,
+
+    # Location relationships
+    ('Location', 'Facility'): True,
+    ('Location', 'Contract'): True,
+
+    # Facility relationships
+    ('Facility', 'Identifier'): True
+}
+
+def is_cross_type_relationship_allowed(type1: str, type2: str) -> bool:
+    """Check if a cross-type relationship between two entity types is allowed"""
+    if not type1 or not type2:
+        return True  # Allow if types are unknown
+
+    if type1 == type2:
+        return True  # Same type is always allowed
+
+    # Check both directions
+    return (ALLOWED_CROSS_TYPE_RELATIONSHIPS.get((type1, type2), False) or
+            ALLOWED_CROSS_TYPE_RELATIONSHIPS.get((type2, type1), False))
+
+def check_entity_compatibility(entity1_orig: str, entity2_orig: str,
+                               entity_details: dict) -> bool:
+    """Check if two entities can be merged/related"""
+
+    e1_lower = entity1_orig.lower()
+    e2_lower = entity2_orig.lower()
+
+    types1 = entity_details.get(e1_lower, {}).get("types", set())
+    types2 = entity_details.get(e2_lower, {}).get("types", set())
+
+    # If either entity has no type info, allow the relationship
+    if not types1 or not types2:
+        return True
+
+    # Check if any combination of types is allowed
+    for t1 in types1:
+        for t2 in types2:
+            if is_cross_type_relationship_allowed(t1, t2):
+                return True
+
+    # Log the rejection for debugging (but less verbose than before)
+    logger.debug(f"Rejecting merge between '{entity1_orig}' ({types1}) and '{entity2_orig}' ({types2}) - no valid cross-type relationship")
+    return False
 
 
 def limit_predicate_length(predicate, max_words=3):
@@ -268,12 +352,9 @@ def standardize_entities(triples: List[Dict], config: Dict) -> List[Dict]:
             e2_lower = entity2_orig.lower()
             if e1_lower == e2_lower: continue
 
-            # Check for potential type mismatch before merging
-            types1 = entity_details.get(e1_lower, {}).get("types", set())
-            types2 = entity_details.get(e2_lower, {}).get("types", set())
-            if types1 and types2 and not types1.intersection(types2):
-                 logger.debug(f"Skipping potential merge between '{entity1_orig}' ({types1}) and '{entity2_orig}' ({types2}) due to type mismatch.")
-                 continue
+            # FIXED: Use the new compatibility check instead of strict type matching
+            if not check_entity_compatibility(entity1_orig, entity2_orig, entity_details):
+                continue
 
             e2_words = set(e2_lower.split())
             # Check for subset relationship
@@ -364,8 +445,7 @@ def standardize_entities(triples: List[Dict], config: Dict) -> List[Dict]:
         standardized_triples_final.append(new_triple)
 
     # 6. Optional: LLM-based resolution (ensure it preserves chunk info & types if used)
-    # Check llm_features_available flag which was set during imports
-    global llm_features_available
+    # FIXED: Use local availability check instead of global variable
     if standardization_config.get("use_llm_for_entities", False):
         if llm_features_available:
             logger.info("Attempting LLM-based entity resolution after rule-based standardization...")
