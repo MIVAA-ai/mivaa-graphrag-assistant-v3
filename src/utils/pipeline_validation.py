@@ -350,12 +350,12 @@ class PipelineValidationProcessor:
         if excellent_files == total_files:
             recommendations.append("🚀 All files ready for automated processing!")
         elif excellent_files > total_files * 0.7:
-            recommendations.append(f"✅ Most files ({excellent_files}/{total_files}) ready for automated processing")
+            recommendations.append(f"Most files ({excellent_files}/{total_files}) ready for automated processing")
         else:
             recommendations.append(f"⚠️ Only {excellent_files}/{total_files} files ready for automated processing")
 
         if poor_files > 0:
-            recommendations.append(f"❌ {poor_files} files have quality issues and need manual review")
+            recommendations.append(f"{poor_files} files have quality issues and need manual review")
 
         if handwriting_files > 0:
             recommendations.append(f"✍️ {handwriting_files} files may contain handwriting - consider manual data entry")

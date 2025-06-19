@@ -85,7 +85,7 @@ with tab1:
                     )
 
                     progress_bar.progress(1.0)
-                    status_text.success(f"✅ Processed {len(batch_results)} files successfully!")
+                    status_text.success(f"Processed {len(batch_results)} files successfully!")
 
                     # Display results
                     with results_container:
@@ -111,7 +111,7 @@ with tab1:
                         for result in batch_results:
                             results_data.append({
                                 'Filename': result['original_filename'],
-                                'Status': '✅ Success' if result['success'] else '❌ Failed',
+                                'Status': 'Success' if result['success'] else 'Failed',
                                 'Text Length': f"{result.get('text_length', 0):,}",
                                 'Saved Files': len(result.get('saved_files', {})) if save_to_disk else 'Not saved',
                                 'Error': result.get('error', result.get('save_error', ''))[:50] if not result[
@@ -132,7 +132,7 @@ with tab1:
                                         st.write("---")
 
                 except Exception as e:
-                    st.error(f"❌ Processing failed: {str(e)}")
+                    st.error(f"Processing failed: {str(e)}")
 
 with tab2:
     st.header("📁 Browse Saved OCR Files")
@@ -249,7 +249,7 @@ with tab3:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
 
-                    st.success(f"✅ Excel file created: {excel_path}")
+                    st.success(f"Excel file created: {excel_path}")
 
             except ImportError:
                 st.error("📦 Please install pandas and openpyxl for Excel export:\n```pip install pandas openpyxl```")
@@ -282,7 +282,7 @@ with tab3:
                     mime="application/zip"
                 )
 
-                st.success("✅ ZIP archive created successfully!")
+                st.success("ZIP archive created successfully!")
 
         except Exception as e:
             st.error(f"ZIP creation failed: {e}")
@@ -328,7 +328,7 @@ with tab4:
 
                 shutil.rmtree(storage_path)
                 storage_path.mkdir(exist_ok=True)
-                st.success("✅ All files cleared successfully!")
+                st.success("All files cleared successfully!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Cleanup failed: {e}")

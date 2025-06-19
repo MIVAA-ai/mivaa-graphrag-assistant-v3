@@ -26,7 +26,9 @@ try:
         get_enhanced_ocr_pipeline  # Add the enhanced OCR pipeline import
     )
     # Import the enhanced OCR compatibility functions
-    from enhanced_ocr_pipeline import process_uploaded_file_ocr_with_storage, process_batch_with_enhanced_storage
+    from src.utils.processing_pipeline import process_batch_with_enhanced_storage
+    from src.utils.processing_pipeline import process_uploaded_file_ocr_with_storage
+    from enhanced_ocr_pipeline import EnhancedOCRPipeline, create_enhanced_config
 except ImportError as e:
     st.error(
         f"Error importing project modules in Data Ingestion page: {e}. Ensure graphrag_app.py, audit_db_manager.py, and processing_pipeline.py are accessible.")
@@ -185,35 +187,35 @@ if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_c
                         if result['success']:
                             ocr_results.append({
                                 'filename': uploaded_file.name,
-                                'status': f'✅ {result.get("method_used", "unknown").upper()}',
+                                'status': f'{result.get("method_used", "unknown").upper()}',
                                 'confidence': f"{result.get('confidence', 0.0):.3f}",
                                 'text_length': result.get('text_length', 0),
                                 'processing_time': f"{result.get('processing_time', 0.0):.2f}s",
                                 'saved_files': len(result.get('saved_files', {}))
                             })
                             status_text.success(
-                                f"✅ {uploaded_file.name}: {result.get('text_length', 0)} chars via {result.get('method_used', 'unknown')}")
+                                f"{uploaded_file.name}: {result.get('text_length', 0)} chars via {result.get('method_used', 'unknown')}")
                         else:
                             ocr_results.append({
                                 'filename': uploaded_file.name,
-                                'status': '❌ Failed',
+                                'status': 'Failed',
                                 'confidence': '0.000',
                                 'text_length': 0,
                                 'processing_time': '0.00s',
                                 'saved_files': 0
                             })
-                            status_text.error(f"❌ {uploaded_file.name}: {result.get('error', 'Unknown error')}")
+                            status_text.error(f"{uploaded_file.name}: {result.get('error', 'Unknown error')}")
 
                     except Exception as e:
                         ocr_results.append({
                             'filename': uploaded_file.name,
-                            'status': f'❌ Error: {str(e)[:50]}',
+                            'status': f'Error: {str(e)[:50]}',
                             'confidence': '0.000',
                             'text_length': 0,
                             'processing_time': '0.00s',
                             'saved_files': 0
                         })
-                        status_text.error(f"❌ {uploaded_file.name}: {str(e)}")
+                        status_text.error(f"{uploaded_file.name}: {str(e)}")
 
                     progress_bar.progress((i + 1) / len(uploaded_files))
 
@@ -258,14 +260,14 @@ if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_c
 
         if job_id:
             st.success(
-                f"✅ Ingestion Job '{job_id}' started successfully in the background. See history below for progress.")
+                f"Ingestion Job '{job_id}' started successfully in the background. See history below for progress.")
             # Store the running job ID to potentially show live status (optional future feature)
             st.session_state['running_ingestion_job_id'] = job_id
             # Give the thread a moment to start and update status
             time.sleep(1)
             st.rerun()  # Rerun to refresh the history table
         else:
-            st.error("❌ Failed to start ingestion job. Check logs for details.")
+            st.error("Failed to start ingestion job. Check logs for details.")
     elif not processing_possible:
         st.error("Cannot start ingestion due to missing critical resources (check warnings above).")
 
@@ -330,12 +332,12 @@ if running_job_id:
                 # Display final status message
                 if status == 'Completed':
                     st.success(
-                        f"✅ Job `{running_job_id}` completed successfully ({success_count} processed, {cached_count} cached).")
+                        f"Job `{running_job_id}` completed successfully ({success_count} processed, {cached_count} cached).")
                 elif status == 'Completed with Errors':
                     st.warning(
                         f"⚠️ Job `{running_job_id}` completed with errors. Processed: {success_count}, Cached: {cached_count}, Failed: {len(failed_files_summary)}. Details: {', '.join(failed_files_summary)}")
                 else:  # Failed
-                    st.error(f"❌ Job `{running_job_id}` failed.")
+                    st.error(f"Job `{running_job_id}` failed.")
                 # No rerun needed here, state change will trigger it if needed by other interactions
 
             else:
@@ -648,7 +650,7 @@ if enhanced_ocr_pipeline:
             st.write(f"Languages: {', '.join(enhanced_ocr_pipeline.easyocr_languages)}")
             st.write(f"GPU: {'✅' if enhanced_ocr_pipeline.easyocr_gpu else '❌'}")
         else:
-            st.error("❌ **EasyOCR Not Available**")
+            st.error("**EasyOCR Not Available**")
 
     with col2:
         if enhanced_ocr_pipeline.mistral_client:
@@ -679,7 +681,7 @@ if enhanced_ocr_pipeline:
             "☁️ **Basic Setup**: Only Mistral API available. Consider installing EasyOCR for better accuracy and cost savings: `pip install easyocr`")
     else:
         st.error(
-            "❌ **No OCR Available**: Please install EasyOCR (`pip install easyocr`) or add Mistral API key to config.toml")
+            "**No OCR Available**: Please install EasyOCR (`pip install easyocr`) or add Mistral API key to config.toml")
 
 # --- Configuration Help Section ---
 with st.expander("⚙️ Configuration Help", expanded=False):

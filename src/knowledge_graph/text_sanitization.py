@@ -410,7 +410,7 @@ class TextSanitizer:
 4. **NEVER ADD CONTEXT**: Do not add background information, standards, or domain knowledge
 5. **NEVER CREATE ENTITIES**: Do not generate equipment codes, serial numbers, or organizational details
 
-✅ ONLY ALLOWED CORRECTIONS:
+ONLY ALLOWED CORRECTIONS:
 1. **OCR Character Fixes**: 
    - "0f" → "of", "fank" → "tank", "chcmical" → "chemical"
    - "tech-s" → "technician", "bbls" → "barrels"
@@ -426,7 +426,7 @@ class TextSanitizer:
    - "PM" → "Preventive Maintenance" (only if clearly maintenance context)
    - Keep original abbreviation: "SWD (Salt Water Disposal)"
 
-❌ FORBIDDEN ACTIONS:
+FORBIDDEN ACTIONS:
 - Do NOT add: Asset IDs (OT-001, WO-2025-001), Serial Numbers, Personnel names
 - Do NOT create: Equipment lists, Structured sections, Missing information placeholders  
 - Do NOT infer: Detailed procedures, Maintenance activities, Equipment relationships
@@ -439,7 +439,7 @@ Input: "Drive to location, total 0f25 bbls 0 boltonis slowly pull from oil fank"
 Output: "Drive to location, total of 25 barrels bolt-ons slowly pull from oil tank"
 
 EXAMPLE - WRONG APPROACH (DO NOT DO THIS):
-❌ "Work Order: WO-2025-001, Equipment: Oil Tank OT-001, Activity: Corrective Maintenance"
+"Work Order: WO-2025-001, Equipment: Oil Tank OT-001, Activity: Corrective Maintenance"
 
 Your output should read like a cleaned version of the original text, NOT a structured maintenance report. Preserve the original style, length, and level of detail exactly."""
 

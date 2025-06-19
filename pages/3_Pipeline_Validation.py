@@ -107,7 +107,7 @@ if validation_files:
                 status_text.text(f"Validation completed in {processing_time:.1f}s")
 
                 # Display results
-                st.success("✅ Validation completed successfully!")
+                st.success("Validation completed successfully!")
 
                 # Summary metrics
                 st.subheader("📈 Summary Metrics")
@@ -277,7 +277,7 @@ if validation_files:
                     )
 
             except Exception as e:
-                st.error(f"❌ Validation failed: {str(e)}")
+                st.error(f"Validation failed: {str(e)}")
                 logger.error(f"Validation error: {e}", exc_info=True)
 
 else:

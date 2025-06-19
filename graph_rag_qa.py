@@ -1675,7 +1675,7 @@ if __name__ == "__main__":
              print("\nFATAL: QA Engine failed to initialize correctly. Exiting.")
              sys.exit(1)
 
-        print("✅ QA engine ready.")
+        print("QA engine ready.")
         print("\n🔍 Ask questions (type 'exit' or 'quit' to stop):")
 
         async def run_question(question_text):
@@ -1710,7 +1710,7 @@ if __name__ == "__main__":
          print(f"\nFATAL: Could not initialize QA Engine (Neo4j Connection Failed): {e}")
          sys.exit(1)
     except Exception as e:
-        logger.exception("❌ An unexpected error occurred during QA engine operation.")
+        logger.exception("An unexpected error occurred during QA engine operation.")
         print(f"\nAn unexpected error occurred: {e}")
         sys.exit(1)
     finally:

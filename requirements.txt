@@ -1,47 +1,48 @@
-# Core Processing & OCR
-easyocr
-opencv-python
-pdf2image
-pillow
-chardet
+# =================================================================
+# MIVAA GraphRAG Assistant v3 - LLM OCR Optimized Dependencies
+# =================================================================
 
-# Document Processing  
-fitz  # PyMuPDF
+# LLM Providers (Core OCR Engine)
+google-generativeai>=0.3.0    # Gemini 1.5 Flash - Primary OCR
+openai>=1.0.0                 # GPT-4o Vision - High Quality OCR
+anthropic>=0.8.0              # Claude 3.5 Sonnet - Alternative OCR
+mistralai>=0.1.0              # Pixtral - Specialized OCR (Optional)
+
+# Document Processing (LLM OCR Pipeline)
+pillow>=9.0.0                 # Image processing for LLM input
+PyMuPDF>=1.23.0               # PDF to image conversion
+toml>=0.10.0                  # Configuration management
 
 # Database & Vector Storage
-neo4j
-chromadb
-sentence-transformers
+neo4j>=5.0.0                  # Knowledge graph database
+chromadb>=0.4.0               # Vector embeddings storage
+sentence-transformers>=2.2.0  # Text embeddings for GraphRAG
 
 # Web Framework
-streamlit
-
-# AI/ML Libraries
-mistralai
-google-generativeai
+streamlit>=1.28.0             # Main application interface
 
 # Text Processing & Knowledge Graph
-langchain-text-splitters
-llama-index
-spacy
+langchain-text-splitters>=0.0.1  # Text chunking for GraphRAG
+llama-index>=0.9.0            # Knowledge graph construction
+tiktoken>=0.5.0               # Token counting for LLM usage
+spacy>=3.4.0                  # NLP processing for GraphRAG pipeline
 
 # Data Processing
-numpy
-pandas
-networkx
+numpy>=1.24.0                 # Numerical operations
+pandas>=2.0.0                 # Data manipulation and analysis
+networkx>=3.0                 # Graph algorithms and analysis
 
-# Graph Visualization  
-pyvis
+# Graph Visualization
+pyvis>=0.3.0                  # Interactive network visualization
 
 # Async Support
-nest-asyncio
+nest-asyncio>=1.5.0           # Async support for Streamlit
 
 # Environment & Configuration
-python-dotenv
+python-dotenv>=1.0.0          # Environment variables management
 
 # HTTP Requests
-requests
+requests>=2.31.0              # HTTP client for API calls
 
-# Community Detection (if used for graph analysis)
-# Note: 'community' package may be python-louvain
-python-louvain
+# Community Detection for Graph Analysis
+python-louvain>=0.16          # Community detection algorithms
