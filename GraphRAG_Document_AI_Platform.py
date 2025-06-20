@@ -1,4 +1,4 @@
-# graphrag_app.py (Main App Entry Point - FIXED VERSION)
+# GraphRAG_Document_AI_Platform.py (Main App Entry Point - FIXED VERSION)
 
 import nest_asyncio
 
@@ -16,8 +16,8 @@ import re
 from typing import Dict, Optional, Any
 
 st.set_page_config(
-    page_title="GraphRAG Assistant",
-    page_icon="📄",
+    page_title="Document AI Assistant",  # Updated page title
+    page_icon="🤖",  # Updated icon to be more AI-focused
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -519,7 +519,8 @@ def get_nlp_pipeline(config):
 def main():
     """Sets up the main app configuration and landing page."""
 
-    st.title("📄 Document GraphRAG Assistant")
+    # Updated main title
+    st.title("🤖 Document AI Assistant")
 
     # Load configuration early
     config = load_config()
@@ -543,17 +544,23 @@ def main():
     st.session_state.setdefault("last_response_error", None)
     st.session_state.setdefault("last_response_info", None)
 
-    # Landing Page Content
+    # Landing Page Content with Updated Display Names
     st.info("Select an option from the sidebar to get started:")
-    st.page_link("pages/2_Data_Ingestion.py", label="Process New Documents", icon="📥")
-    st.page_link("pages/1_Chat_Assistant.py", label="Ask Questions (Chat)", icon="💬")
+
+    # Updated page links with new display names (keeping file names unchanged)
+    st.page_link("pages/2_Document_Ingestion.py", label="Document Ingestion", icon="📥")
+    st.page_link("pages/1_Knowledge_Chat_Assistant.py", label="Knowledge Chat Assistant", icon="💬")
+    st.page_link("pages/3_Data_Extraction_Validation.py", label="Data Extraction Validation", icon="📊")
+    st.page_link("pages/4_OCR_Output_Analyzer.py", label="Processed Files Manager", icon="🗂️")
 
     st.markdown("---")
     st.markdown("""
-    **Welcome!**
+    **Welcome to your AI-powered Document Assistant!**
 
-    * Use **Data Ingestion** to upload documents (PDF, TXT, images via OCR). The system will extract information, build a knowledge graph, and create vector embeddings.
-    * Use **Chat Assistant** to ask questions about the information contained within your processed documents.
+    * Use **Document Ingestion** to upload documents (PDF, TXT, images via OCR). The AI will extract information, build a knowledge graph, and create vector embeddings.
+    * Use **Knowledge Chat Assistant** to ask questions about the information contained within your processed documents.
+    * Use **Data Extraction Validation** to monitor AI extraction quality and performance metrics.
+    * Use **Processed Files Manager** to browse and manage your document archive.
 
     **Security Note**: All API keys and passwords are automatically masked in application logs for security.
     """)

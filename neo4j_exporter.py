@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 import json
 import configparser
+import time
 
 try:
     import tomllib
@@ -358,6 +359,214 @@ class Neo4jExporter:
         """Exit the runtime context and ensure connection closure."""
         self.close()
         return False
+
+
+def store_document_metadata_in_neo4j(self, ocr_result: Dict, document_id: str):
+    """
+    Store document-level metadata as nodes in Neo4j.
+
+    Args:
+        ocr_result: OCR result with metadata
+        document_id: Unique document identifier
+    """
+    if not self.driver:
+        logger.error("Neo4j driver not initialized")
+        return False
+
+    try:
+        with self.driver.session(database="neo4j") as session:
+            # Create Document node with metadata
+            session.run("""
+                MERGE (d:Document {id: $doc_id})
+                SET d.filename = $filename,
+                    d.file_type = $file_type,
+                    d.file_size = $file_size,
+                    d.ocr_method = $ocr_method,
+                    d.ocr_confidence = $ocr_confidence,
+                    d.processing_time = $processing_time,
+                    d.text_length = $text_length,
+                    d.document_type = $document_type,
+                    d.language = $language,
+                    d.page_count = $page_count,
+                    d.upload_timestamp = $upload_timestamp,
+                    d.processing_timestamp = $processing_timestamp,
+                    d.quality_score = $quality_score,
+                    d.has_tables = $has_tables,
+                    d.word_count = $word_count,
+                    d.created_at = timestamp()
+            """, {
+                'doc_id': document_id,
+                'filename': ocr_result.get('original_filename', 'unknown'),
+                'file_type': ocr_result.get('file_type', 'unknown'),
+                'file_size': ocr_result.get('file_size_bytes', 0),
+                'ocr_method': ocr_result.get('method_used', 'unknown'),
+                'ocr_confidence': ocr_result.get('confidence', 0.0),
+                'processing_time': ocr_result.get('processing_time', 0.0),
+                'text_length': len(ocr_result.get('text', '')),
+                'document_type': ocr_result.get('document_type', 'unknown'),
+                'language': ocr_result.get('language_detected', 'en'),
+                'page_count': ocr_result.get('page_count', 1),
+                'upload_timestamp': ocr_result.get('upload_timestamp', ''),
+                'processing_timestamp': ocr_result.get('extraction_timestamp', ''),
+                'quality_score': ocr_result.get('text_quality_score', 0.0),
+                'has_tables': ocr_result.get('has_tables', False),
+                'word_count': len(ocr_result.get('text', '').split())
+            })
+
+            # Link Document to Chunks
+            chunk_ids = ocr_result.get('chunk_ids', [])
+            for chunk_id in chunk_ids:
+                session.run("""
+                    MATCH (d:Document {id: $doc_id})
+                    MATCH (c:Chunk {id: $chunk_id})
+                    MERGE (d)-[:CONTAINS_CHUNK]->(c)
+                """, {
+                    'doc_id': document_id,
+                    'chunk_id': chunk_id
+                })
+
+            # Create entity relationships with document context
+            detected_entities = ocr_result.get('detected_entities', {})
+            for entity_type, entities in detected_entities.items():
+                for entity_name in entities:
+                    session.run("""
+                        MATCH (d:Document {id: $doc_id})
+                        MERGE (e:Entity {name: $entity_name})
+                        MERGE (d)-[:MENTIONS {entity_type: $entity_type}]->(e)
+                    """, {
+                        'doc_id': document_id,
+                        'entity_name': entity_name,
+                        'entity_type': entity_type
+                    })
+
+            logger.info(f"Stored document metadata for {document_id}")
+            return True
+
+    except Exception as e:
+        logger.error(f"Failed to store document metadata: {e}")
+        return False
+
+
+def enhanced_store_triples_with_metadata(self, triples: List[Dict], ocr_metadata: Dict = None):
+    """
+    Enhanced triple storage that includes OCR metadata and document context.
+
+    Args:
+        triples: List of extracted triples
+        ocr_metadata: Metadata from OCR processing
+    """
+    if not triples:
+        return True, 0
+
+    try:
+        with self.driver.session(database="neo4j") as session:
+            with session.begin_transaction() as tx:
+                # Store document metadata first if provided
+                if ocr_metadata:
+                    doc_id = ocr_metadata.get('file_id', 'unknown')
+                    self.store_document_metadata_in_neo4j(ocr_metadata, doc_id)
+
+                # Process triples with enhanced metadata
+                for triple in triples:
+                    subject = triple.get("subject", "").strip()
+                    predicate = triple.get("predicate", "").strip()
+                    object_ = triple.get("object", "").strip()
+
+                    if not all([subject, predicate, object_]):
+                        continue
+
+                    # Enhanced triple storage with metadata
+                    rel_type = self.sanitize_predicate(predicate)
+
+                    tx.run("""
+                        MERGE (s:Entity {name: $subject})
+                        MERGE (o:Entity {name: $object})
+                        MERGE (s)-[r:`{rel_type}`]->(o)
+                        SET r.original = $original_predicate,
+                            r.confidence = $confidence,
+                            r.extraction_method = $extraction_method,
+                            r.source_document = $source_document,
+                            r.chunk_id = $chunk_id,
+                            r.created_at = timestamp()
+                    """.format(rel_type=rel_type), {
+                        'subject': subject,
+                        'object': object_,
+                        'original_predicate': predicate,
+                        'confidence': triple.get('confidence', 1.0),
+                        'extraction_method': ocr_metadata.get('method_used', 'unknown') if ocr_metadata else 'unknown',
+                        'source_document': ocr_metadata.get('file_id', 'unknown') if ocr_metadata else 'unknown',
+                        'chunk_id': triple.get('chunk_id', 'unknown')
+                    })
+
+                logger.info(f"Stored {len(triples)} triples with enhanced metadata")
+                return True, len(triples)
+
+    except Exception as e:
+        logger.error(f"Failed to store enhanced triples: {e}")
+        return False, 0
+
+
+def get_document_analysis_summary(self, document_id: str) -> Dict:
+    """
+    Get comprehensive analysis summary for a document.
+
+    Args:
+        document_id: Document identifier
+
+    Returns:
+        Dictionary with document analysis summary
+    """
+    if not self.driver:
+        return {}
+
+    try:
+        with self.driver.session(database="neo4j") as session:
+            # Get document metadata
+            doc_result = session.run("""
+                MATCH (d:Document {id: $doc_id})
+                RETURN d
+            """, doc_id=document_id)
+
+            doc_record = doc_result.single()
+            if not doc_record:
+                return {}
+
+            doc_data = dict(doc_record['d'])
+
+            # Get entity mentions
+            entities_result = session.run("""
+                MATCH (d:Document {id: $doc_id})-[:MENTIONS]->(e:Entity)
+                RETURN e.name as entity, count(*) as mentions
+                ORDER BY mentions DESC
+                LIMIT 20
+            """, doc_id=document_id)
+
+            entities = [{'name': record['entity'], 'mentions': record['mentions']}
+                        for record in entities_result]
+
+            # Get relationship summary
+            rels_result = session.run("""
+                MATCH (d:Document {id: $doc_id})-[:CONTAINS_CHUNK]->(c:Chunk)
+                MATCH (s:Entity)-[r]->(o:Entity)
+                WHERE (s)-[:FROM_CHUNK]->(c) AND (o)-[:FROM_CHUNK]->(c)
+                RETURN type(r) as relationship_type, count(*) as count
+                ORDER BY count DESC
+                LIMIT 10
+            """, doc_id=document_id)
+
+            relationships = [{'type': record['relationship_type'], 'count': record['count']}
+                             for record in rels_result]
+
+            return {
+                'document_metadata': doc_data,
+                'top_entities': entities,
+                'relationship_summary': relationships,
+                'analysis_timestamp': time.time()
+            }
+
+    except Exception as e:
+        logger.error(f"Failed to get document analysis: {e}")
+        return {}
 
 
 # Example usage in main block with reduced logging

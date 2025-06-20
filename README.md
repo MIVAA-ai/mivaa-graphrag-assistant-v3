@@ -55,9 +55,9 @@ The Document GraphRAG Q&A Assistant is a Streamlit application designed to inges
 The application consists of the following main components:
 
 1. **Streamlit Frontend:**
-   * `graphrag_app.py`: Main application entry point
-   * `pages/1_Chat_Assistant.py`: Chat interface
-   * `pages/2_Data_Ingestion.py`: Document uploading and audit trail display
+   * `GraphRAG_Document_AI_Platform.py`: Main application entry point
+   * `pages/1_knowledge_chat_assistant.py`: Chat interface
+   * `pages/2_document_ingestion.py`: Document uploading and audit trail display
 
 2. **Backend Processing & Logic:**
    * `processing_pipeline.py`: Orchestrates document ingestion workflow
@@ -184,12 +184,12 @@ The application consists of the following main components:
 
 3. **Run the Streamlit application:**
    ```bash
-   streamlit run graphrag_app.py
+   streamlit run GraphRAG_Document_AI_Platform.py
    ```
 
    For development (to avoid file watcher issues):
    ```bash
-   streamlit run graphrag_app.py --server.fileWatcherType none
+   streamlit run GraphRAG_Document_AI_Platform.py --server.fileWatcherType none
    ```
 
 4. **Access the application** in your web browser (usually at http://localhost:8501)

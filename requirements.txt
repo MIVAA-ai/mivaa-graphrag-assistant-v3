@@ -46,3 +46,5 @@ requests>=2.31.0              # HTTP client for API calls
 
 # Community Detection for Graph Analysis
 python-louvain>=0.16          # Community detection algorithms
+
+jinja2>=3.0.0

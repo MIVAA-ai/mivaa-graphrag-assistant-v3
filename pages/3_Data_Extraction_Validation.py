@@ -1,20 +1,19 @@
-# pages/3_Pipeline_Validation.py
+# pages/3_Data_Extraction_Validation.py
 
 import streamlit as st
 import time
 import logging
 import pandas as pd
 from typing import List, Any, Dict
+st.set_page_config(page_title="Data Extraction Validation")
 
 # Import your existing components
 try:
-    from graphrag_app import load_config, get_mistral_client
+    from GraphRAG_Document_AI_Platform import load_config, get_mistral_client
     from src.utils.pipeline_validation import create_validator
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
-
-# Note: Page config is set in main app, not in individual pages
 
 # Setup logging
 logger = logging.getLogger(__name__)

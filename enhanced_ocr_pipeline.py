@@ -188,6 +188,7 @@ class LLMOCRExtractor:
                 logger.info("Gemini 1.5 Flash initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini: {e}")
+                self.gemini_client = None
 
         # OpenAI client
         openai_api_key = (
@@ -201,6 +202,7 @@ class LLMOCRExtractor:
                 logger.info("OpenAI GPT-4o Vision initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI: {e}")
+                self.openai_client = None
 
         # Claude client
         claude_api_key = (
@@ -214,6 +216,7 @@ class LLMOCRExtractor:
                 logger.info("Claude 3.5 Sonnet initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Claude: {e}")
+                self.claude_client = None
 
         # Mistral client
         mistral_api_key = (
@@ -229,6 +232,7 @@ class LLMOCRExtractor:
                 logger.info("Mistral Pixtral initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Mistral: {e}")
+                self.mistral_client = None
 
     def _convert_file_to_image(self, uploaded_file) -> bytes:
         """Convert uploaded file to image bytes for LLM processing"""
@@ -621,13 +625,13 @@ This is for business document processing - perfect accuracy required."""
     def _get_available_methods(self) -> List[str]:
         """Get list of available LLM methods"""
         methods = []
-        if self.gemini_client:
+        if self.gemini_client is not None:
             methods.append("gemini")
-        if self.openai_client:
+        if self.openai_client is not None:
             methods.append("openai")
-        if self.claude_client:
+        if self.claude_client is not None:
             methods.append("claude")
-        if self.mistral_client:
+        if self.mistral_client is not None:
             methods.append("mistral")
         return methods
 
@@ -662,6 +666,8 @@ This is for business document processing - perfect accuracy required."""
 
         # Get available methods
         available_methods = self._get_available_methods()
+        logger.info(f"Available LLM methods: {available_methods}")
+
         if not available_methods:
             logger.error("No LLM clients available for OCR")
             return OCRResult(
@@ -683,6 +689,8 @@ This is for business document processing - perfect accuracy required."""
         else:
             methods_to_try = available_methods
 
+        logger.info(f"Will try methods in order: {methods_to_try}")
+
         # Try extraction methods in order
         last_error = None
         for method in methods_to_try:
@@ -698,6 +706,7 @@ This is for business document processing - perfect accuracy required."""
                 elif method == "mistral":
                     result = self._extract_with_mistral(image_data, file_name)
                 else:
+                    logger.warning(f"Unknown method: {method}")
                     continue
 
                 # If successful, save and return

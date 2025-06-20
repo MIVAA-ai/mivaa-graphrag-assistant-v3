@@ -200,6 +200,158 @@ def create_and_store_embeddings(
         logger.error("Failed to add embeddings to ChromaDB collection '%s': %s", collection_name, e, exc_info=True)
 
 
+def store_ocr_results_in_vector_db(
+        ocr_results: List[Dict],  # From your OCR pipeline
+        model_name: str = DEFAULT_EMBEDDING_MODEL,
+        chroma_path: str = CHROMA_PERSIST_PATH,
+        collection_name: str = COLLECTION_NAME
+):
+    """
+    Enhanced function to store OCR results with rich metadata in ChromaDB.
+
+    Args:
+        ocr_results: List of OCR results with text and metadata
+        model_name: Sentence transformer model name
+        chroma_path: ChromaDB persistence path
+        collection_name: Collection name
+    """
+    if not ocr_results:
+        logger.warning("No OCR results provided to embed.")
+        return
+
+    # Initialize embedding model
+    model = SentenceTransformer(model_name)
+
+    # Initialize ChromaDB
+    client = chromadb.PersistentClient(path=chroma_path)
+    chroma_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
+
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        embedding_function=chroma_ef,
+        metadata={"hnsw:space": "cosine"}
+    )
+
+    # Prepare data for embedding
+    documents = []
+    metadatas = []
+    ids = []
+
+    for idx, result in enumerate(ocr_results):
+        # Create unique ID
+        file_id = result.get('file_id', f"doc_{idx}")
+        chunk_id = f"{file_id}_chunk_{idx}"
+
+        # Extract text for embedding
+        text_content = result.get('text', '')
+        if not text_content.strip():
+            continue
+
+        documents.append(text_content)
+        ids.append(chunk_id)
+
+        # Create comprehensive metadata
+        metadata = {
+            # File Information
+            "file_id": result.get('file_id', f"doc_{idx}"),
+            "filename": result.get('original_filename', 'unknown'),
+            "file_type": result.get('file_type', 'unknown'),
+            "file_size": result.get('file_size_bytes', 0),
+
+            # OCR Processing Info
+            "ocr_method": result.get('method_used', 'unknown'),
+            "ocr_confidence": result.get('confidence', 0.0),
+            "processing_time": result.get('processing_time', 0.0),
+            "text_length": len(text_content),
+
+            # Document Classification
+            "document_type": result.get('document_type', 'unknown'),
+            "language": result.get('language_detected', 'en'),
+            "page_count": result.get('page_count', 1),
+
+            # Content Analysis
+            "word_count": len(text_content.split()),
+            "has_tables": result.get('has_tables', False),
+            "has_financial_data": bool(result.get('invoice_fields')),
+
+            # Timestamps
+            "upload_timestamp": result.get('upload_timestamp', ''),
+            "processing_timestamp": result.get('extraction_timestamp', ''),
+
+            # Quality Metrics
+            "quality_score": result.get('text_quality_score', 0.0),
+            "complexity": result.get('complexity_score', 'unknown'),
+
+            # Domain-specific (Energy/Oil & Gas)
+            "well_count": len(result.get('detected_entities', {}).get('wells', [])),
+            "company_count": len(result.get('detected_entities', {}).get('companies', [])),
+            "formation_count": len(result.get('detected_entities', {}).get('formations', [])),
+
+            # Source tracking
+            "source_pipeline": "llm_ocr_enhanced",
+            "pipeline_version": "v2.1.0"
+        }
+
+        # Add detected entities as searchable fields
+        entities = result.get('detected_entities', {})
+        if entities:
+            for entity_type, entity_list in entities.items():
+                if entity_list:
+                    metadata[f"entities_{entity_type}"] = ", ".join(entity_list[:5])  # Limit for metadata size
+
+        metadatas.append(metadata)
+
+    # Generate embeddings and store
+    logger.info(f"Generating embeddings for {len(documents)} OCR documents...")
+    embeddings = model.encode(documents, show_progress_bar=True)
+
+    collection.add(
+        ids=ids,
+        embeddings=embeddings.tolist(),
+        documents=documents,
+        metadatas=metadatas
+    )
+
+    logger.info(f"Stored {len(documents)} OCR results in vector database with enhanced metadata")
+    return collection.count()
+
+
+def enhanced_similarity_search(
+        query: str,
+        collection_name: str = COLLECTION_NAME,
+        n_results: int = 5,
+        filters: Dict = None
+):
+    """
+    Enhanced similarity search with metadata filtering.
+
+    Args:
+        query: Search query text
+        collection_name: ChromaDB collection name
+        n_results: Number of results to return
+        filters: Metadata filters (e.g., {"document_type": "invoice"})
+    """
+    client = chromadb.PersistentClient(path=CHROMA_PERSIST_PATH)
+    collection = client.get_collection(collection_name)
+
+    # Build where clause for filtering
+    where_clause = {}
+    if filters:
+        where_clause.update(filters)
+
+    results = collection.query(
+        query_texts=[query],
+        n_results=n_results,
+        where=where_clause if where_clause else None,
+        include=['documents', 'metadatas', 'distances']
+    )
+
+    return {
+        'documents': results['documents'][0],
+        'metadatas': results['metadatas'][0],
+        'distances': results['distances'][0]
+    }
+
 # --- Main Execution Block ---
 if __name__ == "__main__":
     print("--- Chunk Embedding and Vector Storage Script ---")

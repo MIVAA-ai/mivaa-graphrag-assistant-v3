@@ -1,4 +1,4 @@
-# pages/2_Data_Ingestion.py
+# pages/2_Document_Ingestion.py
 
 import streamlit as st
 import logging
@@ -10,12 +10,14 @@ import streamlit.components.v1 as components
 from pathlib import Path
 import neo4j  # Import Neo4j driver to query data
 
+st.set_page_config(page_title="Document Ingestion")
+
 try:
     import src.utils.audit_db_manager  # Needs access to the audit DB functions
     import src.utils.processing_pipeline  # Needs access to start the pipeline thread
     from src.utils.ocr_storage import create_storage_manager
     # Import the functions that provide cached resources from the main app script
-    from graphrag_app import (
+    from GraphRAG_Document_AI_Platform import (
         load_config,
         get_mistral_client,
         init_neo4j_exporter,
@@ -31,7 +33,7 @@ try:
     from enhanced_ocr_pipeline import EnhancedOCRPipeline, create_enhanced_config
 except ImportError as e:
     st.error(
-        f"Error importing project modules in Data Ingestion page: {e}. Ensure graphrag_app.py, audit_db_manager.py, and processing_pipeline.py are accessible.")
+        f"Error importing project modules in Data Ingestion page: {e}. Ensure GraphRAG_Document_AI_Platform.py, audit_db_manager.py, and processing_pipeline.py are accessible.")
     st.stop()
 
 # Import the visualization function (adjust path if needed)
@@ -43,8 +45,9 @@ except ImportError as e:
     st.error(f"Failed to import visualization function: {e}")
     visualize_knowledge_graph = None  # Disable feature if import fails
 
-# Define the output filename constant (can be same as in graphrag_app.py)
+# Define the output filename constant (can be same as in GraphRAG_Document_AI_Platform.py)
 GRAPH_HTML_FILENAME = "graph_visualization.html"
+
 
 # Logger setup
 logger = logging.getLogger(__name__)

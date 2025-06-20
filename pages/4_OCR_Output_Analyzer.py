@@ -1,4 +1,4 @@
-# pages/4_OCR_Storage_Manager.py
+# pages/4_OCR_Output_Analyzer.py
 
 import streamlit as st
 import pandas as pd
@@ -7,10 +7,11 @@ import json
 import zipfile
 import io
 from datetime import datetime
+st.set_page_config(page_title="Processed Files Manager")
 
 # Import your components
 try:
-    from graphrag_app import load_config, get_mistral_client
+    from GraphRAG_Document_AI_Platform import load_config, get_mistral_client, get_enhanced_ocr_pipeline
     from src.utils.ocr_storage import create_storage_manager
     from src.utils.processing_pipeline import process_uploaded_file_ocr_with_storage, process_batch_with_enhanced_storage
 except ImportError as e:
@@ -29,9 +30,12 @@ def get_storage_manager():
 
 storage_manager = get_storage_manager()
 
-# Load config
+# Load config and initialize components
 config = load_config()
 mistral_client = get_mistral_client(config.get('MISTRAL_API_KEY'))
+
+# ✅ FIX: Get the enhanced OCR pipeline
+enhanced_ocr_pipeline = get_enhanced_ocr_pipeline(config)
 
 # Main tabs
 tab1, tab2, tab3, tab4 = st.tabs(["📤 Extract & Save", "📁 Browse Saved Files", "📊 Export Data", "⚙️ Settings"])
@@ -77,7 +81,7 @@ with tab1:
             with st.spinner("Processing files..."):
 
                 try:
-                    # Process batch with storage
+                    # ✅ FIX: Now enhanced_ocr_pipeline is properly defined
                     batch_results = process_batch_with_enhanced_storage(
                         uploaded_files=uploaded_files,
                         enhanced_ocr_pipeline=enhanced_ocr_pipeline,

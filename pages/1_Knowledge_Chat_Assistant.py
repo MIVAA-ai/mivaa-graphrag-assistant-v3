@@ -1,4 +1,4 @@
-# pages/1_Chat_Assistant.py
+# pages/1_Knowledge_Chat_Assistant.py
 
 import streamlit as st
 import asyncio
@@ -8,15 +8,17 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 import time # Keep if used
 
+st.set_page_config(page_title="Knowledge Chat Assistant")
+
 # Logger setup
 logger = logging.getLogger(__name__)
 if not logging.getLogger().hasHandlers(): # Basic config if needed
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(name)s:%(lineno)d | %(message)s')
 
-# --- Core Imports from graphrag_app.py ---
-# Ensure these are accessible (e.g., graphrag_app.py in root)
+# --- Core Imports from GraphRAG_Document_AI_Platform.py ---
+# Ensure these are accessible (e.g., GraphRAG_Document_AI_Platform.py in root)
 try:
-    from graphrag_app import (
+    from GraphRAG_Document_AI_Platform import (
         load_config,            # <<< IMPORT the function
         get_correction_llm,
         load_qa_engine,
@@ -29,7 +31,7 @@ try:
     # Import Neo4j driver for DB count check (sync driver is fine for this)
     import neo4j
 except ImportError as e:
-    st.error(f"Error importing project modules in Chat Assistant page: {e}. Ensure graphrag_app.py and graph_rag_qa.py are accessible.")
+    st.error(f"Error importing project modules in Chat Assistant page: {e}. Ensure GraphRAG_Document_AI_Platform.py and graph_rag_qa.py are accessible.")
     st.stop()
 except Exception as e:
     st.error(f"An unexpected error occurred during imports: {e}")
@@ -80,7 +82,7 @@ st.title("💬 Chat Assistant")
 st.markdown("Ask questions about the documents processed via the 'Data Ingestion' page.")
 
 # --- Load Config and Initialize QA Engine ---
-# Use functions imported from graphrag_app to access cached resources
+# Use functions imported from GraphRAG_Document_AI_Platform to access cached resources
 qa_engine: Optional[GraphRAGQA] = None # Initialize
 is_engine_ready_for_chat = False # Initialize
 
