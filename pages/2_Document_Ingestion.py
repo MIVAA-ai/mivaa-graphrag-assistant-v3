@@ -10,8 +10,6 @@ import streamlit.components.v1 as components
 from pathlib import Path
 import neo4j  # Import Neo4j driver to query data
 
-st.set_page_config(page_title="Document Ingestion")
-
 try:
     import src.utils.audit_db_manager  # Needs access to the audit DB functions
     import src.utils.processing_pipeline  # Needs access to start the pipeline thread
@@ -48,7 +46,6 @@ except ImportError as e:
 # Define the output filename constant (can be same as in GraphRAG_Document_AI_Platform.py)
 GRAPH_HTML_FILENAME = "graph_visualization.html"
 
-
 # Logger setup
 logger = logging.getLogger(__name__)
 if not logging.getLogger().hasHandlers():  # Basic config if needed
@@ -82,7 +79,7 @@ try:
         st.error("App configuration is invalid. Cannot proceed.")
         st.stop()
 
-    # Initialize resources with enhanced OCR - FIXED INDENTATION
+    # Initialize resources with enhanced LLM OCR
     enhanced_ocr_pipeline = get_enhanced_ocr_pipeline(config)
     neo4j_exporter = init_neo4j_exporter(config.get('NEO4J_URI'), config.get('NEO4J_USER'),
                                          config.get('NEO4J_PASSWORD'))
@@ -92,11 +89,15 @@ try:
     requests_session = get_requests_session()
     nlp_pipeline = get_nlp_pipeline(config)
 
-    # Check OCR availability - FIXED TO USE ENHANCED PIPELINE
+    # Check LLM OCR availability
     ocr_available = enhanced_ocr_pipeline and (
-            enhanced_ocr_pipeline.easyocr_reader or enhanced_ocr_pipeline.mistral_client)
+            enhanced_ocr_pipeline.mistral_client or
+            hasattr(enhanced_ocr_pipeline, 'gemini_client') or
+            hasattr(enhanced_ocr_pipeline, 'openai_client') or
+            hasattr(enhanced_ocr_pipeline, 'anthropic_client')
+    )
     if not ocr_available:
-        st.warning("No OCR method available. Only TXT upload will work.", icon="⚠️")
+        st.warning("No LLM OCR method available. Only TXT upload will work.", icon="⚠️")
 
     # Initialize OCR storage manager
     try:
@@ -123,10 +124,10 @@ except Exception as e:
 # --- File Upload Section ---
 st.header("1. Upload Documents")
 
-# Define allowed file types based on whether OCR is available - FIXED TO USE OCR_AVAILABLE
+# Define allowed file types based on whether LLM OCR is available
 file_types = ["pdf", "png", "jpg", "jpeg", "txt"]
 if not ocr_available:
-    st.warning("OCR not available. Only TXT upload supported.", icon="ℹ️")
+    st.warning("LLM OCR not available. Only TXT upload supported.", icon="ℹ️")
     file_types = ["txt"]
 
 uploaded_files = st.file_uploader(
@@ -159,18 +160,26 @@ process_button_disabled = not uploaded_files  # Disable if no files uploaded
 if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_container_width=True):
     if uploaded_files and processing_possible:
 
-        # Enhanced OCR Pre-processing - FIXED TO USE ENHANCED PIPELINE
+        # Enhanced LLM OCR Pre-processing
         if save_ocr_to_disk and enhanced_ocr_pipeline:
-            with st.expander("📄 Enhanced OCR Pre-Processing", expanded=True):
-                st.info(f"Extracting text using Enhanced OCR Pipeline for {len(uploaded_files)} files...")
+            with st.expander("📄 Enhanced LLM OCR Pre-Processing", expanded=True):
+                st.info(f"Extracting text using Enhanced LLM OCR Pipeline for {len(uploaded_files)} files...")
 
-                # Show OCR method being used
-                if enhanced_ocr_pipeline.easyocr_reader:
-                    st.success("🔥 Using EasyOCR (High Accuracy + Advanced Preprocessing)")
-                elif enhanced_ocr_pipeline.mistral_client:
-                    st.info("☁️ Using Mistral API")
+                # Show LLM OCR methods being used
+                available_methods = []
+                if enhanced_ocr_pipeline.mistral_client:
+                    available_methods.append("☁️ Mistral Pixtral")
+                if hasattr(enhanced_ocr_pipeline, 'gemini_client') and enhanced_ocr_pipeline.gemini_client:
+                    available_methods.append("🔥 Gemini 1.5 Flash")
+                if hasattr(enhanced_ocr_pipeline, 'openai_client') and enhanced_ocr_pipeline.openai_client:
+                    available_methods.append("🚀 GPT-4o Vision")
+                if hasattr(enhanced_ocr_pipeline, 'anthropic_client') and enhanced_ocr_pipeline.anthropic_client:
+                    available_methods.append("🤖 Claude 3.5 Sonnet")
+
+                if available_methods:
+                    st.success(f"Available LLM OCR Methods: {', '.join(available_methods)}")
                 else:
-                    st.warning("⚠️ No OCR method available")
+                    st.warning("⚠️ No LLM OCR methods available")
 
                 progress_bar = st.progress(0)
                 ocr_results = []
@@ -180,7 +189,7 @@ if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_c
                     status_text.info(f"Processing {uploaded_file.name}...")
 
                     try:
-                        # Use the enhanced OCR pipeline compatibility function
+                        # Use the enhanced LLM OCR pipeline compatibility function
                         result = process_uploaded_file_ocr_with_storage(
                             uploaded_file=uploaded_file,
                             enhanced_ocr_pipeline=enhanced_ocr_pipeline,
@@ -222,14 +231,14 @@ if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_c
 
                     progress_bar.progress((i + 1) / len(uploaded_files))
 
-                # Show OCR results summary
+                # Show LLM OCR results summary
                 if ocr_results:
-                    st.subheader("📋 Enhanced OCR Extraction Summary")
+                    st.subheader("📋 Enhanced LLM OCR Extraction Summary")
                     ocr_df = pd.DataFrame(ocr_results)
                     st.dataframe(ocr_df, use_container_width=True)
 
                     # Show successful extractions with enhanced metrics
-                    successful = sum(1 for r in ocr_results if '✅' in r['status'])
+                    successful = sum(1 for r in ocr_results if r['status'] != 'Failed')
                     total_chars = sum(r['text_length'] for r in ocr_results)
                     total_saved = sum(r['saved_files'] for r in ocr_results)
                     avg_confidence = sum(
@@ -245,15 +254,15 @@ if st.button("🚀 Start Ingestion Job", disabled=process_button_disabled, use_c
                     with col4:
                         st.metric("Files Saved", total_saved)
 
-        # Continue with normal ingestion - FIXED TO USE ENHANCED PIPELINE
+        # Continue with normal ingestion using Enhanced LLM OCR Pipeline
         st.info(f"Starting ingestion job for {len(uploaded_files)} file(s) in the background...")
         # Call the function that starts the background thread
         job_id = src.utils.processing_pipeline.start_ingestion_job_async(
             uploaded_files=uploaded_files,
             config=config,
             use_cache=use_cache,
-            # Use enhanced OCR pipeline instead of mistral_client
-            enhanced_ocr_pipeline=enhanced_ocr_pipeline,  # FIXED
+            # Use enhanced LLM OCR pipeline
+            enhanced_ocr_pipeline=enhanced_ocr_pipeline,
             neo4j_exporter=neo4j_exporter,
             embedding_model_resource=embedding_model,
             chroma_collection_resource=chroma_collection,
@@ -593,16 +602,16 @@ else:
 # --- OCR Storage Management Section ---
 if ocr_storage:
     st.markdown("---")
-    st.header("3. OCR Storage Management")
+    st.header("3. LLM OCR Storage Management")
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader("📁 Recently Saved OCR Files")
+        st.subheader("📁 Recently Saved LLM OCR Files")
 
     with col2:
         if st.button("📂 Open Storage Manager", key="open_storage_manager"):
-            st.info("💡 Go to the 'OCR Storage Manager' page for full management features.")
+            st.info("💡 Go to the 'Processed Files Manager' page for full management features.")
 
     try:
         # Show recent OCR files
@@ -635,95 +644,107 @@ if ocr_storage:
             with col3:
                 st.metric("Total Text", f"{total_text:,}")
         else:
-            st.info("📝 No OCR files saved yet. Enable 'Save OCR Output to Disk' above to start saving.")
+            st.info("📝 No LLM OCR files saved yet. Enable 'Save OCR Output to Disk' above to start saving.")
 
     except Exception as e:
-        st.error(f"Error loading OCR storage info: {e}")
+        st.error(f"Error loading LLM OCR storage info: {e}")
 
-# --- Enhanced OCR Status Display ---
+# --- Enhanced LLM OCR Status Display ---
 if enhanced_ocr_pipeline:
     st.markdown("---")
-    st.header("4. Enhanced OCR Status")
+    st.header("4. Enhanced LLM OCR Status")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        if enhanced_ocr_pipeline.easyocr_reader:
-            st.success("🔥 **EasyOCR Ready**")
-            st.write(f"Languages: {', '.join(enhanced_ocr_pipeline.easyocr_languages)}")
-            st.write(f"GPU: {'✅' if enhanced_ocr_pipeline.easyocr_gpu else '❌'}")
+        if enhanced_ocr_pipeline.mistral_client:
+            st.success("☁️ **Mistral Pixtral Ready**")
+            st.write("Specialized OCR & Vision")
         else:
-            st.error("**EasyOCR Not Available**")
+            st.error("**Mistral Pixtral Not Available**")
 
     with col2:
-        if enhanced_ocr_pipeline.mistral_client:
-            st.info("☁️ **Mistral API Ready**")
-            st.write("Available as fallback")
+        if hasattr(enhanced_ocr_pipeline, 'gemini_client') and enhanced_ocr_pipeline.gemini_client:
+            st.success("🔥 **Gemini 1.5 Flash Ready**")
+            st.write("High-quality vision processing")
         else:
-            st.warning("⚠️ **Mistral API Not Available**")
+            st.warning("**Gemini 1.5 Flash Not Available**")
 
     with col3:
-        primary_method = enhanced_ocr_pipeline.primary_method
-        fallback = enhanced_ocr_pipeline.fallback_enabled
-        st.info(f"🎯 **Primary Method**")
-        st.write(f"Method: {primary_method.upper()}")
-        st.write(f"Fallback: {'✅' if fallback else '❌'}")
-        st.write(f"Confidence Threshold: {enhanced_ocr_pipeline.confidence_threshold}")
+        # Count available LLM methods
+        available_count = 0
+        if enhanced_ocr_pipeline.mistral_client:
+            available_count += 1
+        if hasattr(enhanced_ocr_pipeline, 'gemini_client') and enhanced_ocr_pipeline.gemini_client:
+            available_count += 1
+        if hasattr(enhanced_ocr_pipeline, 'openai_client') and enhanced_ocr_pipeline.openai_client:
+            available_count += 1
+        if hasattr(enhanced_ocr_pipeline, 'anthropic_client') and enhanced_ocr_pipeline.anthropic_client:
+            available_count += 1
 
-    # OCR Method Recommendation
-    st.subheader("💡 OCR Method Recommendation")
+        st.info(f"🎯 **LLM OCR Methods**")
+        st.write(f"Available: {available_count}")
+        st.write(f"Fallback: {'✅' if available_count > 1 else '❌'}")
 
-    if enhanced_ocr_pipeline.easyocr_reader and enhanced_ocr_pipeline.mistral_client:
+    # LLM OCR Method Recommendation
+    st.subheader("💡 LLM OCR Method Recommendation")
+
+    if available_count >= 2:
         st.success(
-            "🎉 **Optimal Setup**: Both EasyOCR and Mistral API available. You have maximum accuracy with intelligent fallback!")
-    elif enhanced_ocr_pipeline.easyocr_reader:
+            "🎉 **Optimal Setup**: Multiple LLM OCR methods available. You have maximum accuracy with intelligent fallback!")
+    elif available_count == 1:
         st.info(
-            "🔥 **Good Setup**: EasyOCR available for high-accuracy, cost-free OCR. Consider adding Mistral API key for fallback on difficult documents.")
-    elif enhanced_ocr_pipeline.mistral_client:
-        st.warning(
-            "☁️ **Basic Setup**: Only Mistral API available. Consider installing EasyOCR for better accuracy and cost savings: `pip install easyocr`")
+            "🔥 **Good Setup**: One LLM OCR method available. Consider adding more API keys for fallback redundancy.")
     else:
         st.error(
-            "**No OCR Available**: Please install EasyOCR (`pip install easyocr`) or add Mistral API key to config.toml")
+            "**No LLM OCR Available**: Please add at least one LLM API key to config.toml (Gemini, Mistral, OpenAI, or Anthropic)")
 
 # --- Configuration Help Section ---
-with st.expander("⚙️ Configuration Help", expanded=False):
+with st.expander("⚙️ LLM OCR Configuration Help", expanded=False):
     st.markdown("""
-    ### Enhanced OCR Configuration
+    ### Enhanced LLM OCR Configuration
 
     **Add this to your `config.toml` file:**
 
     ```toml
+    [llm]
+    # Primary LLM for text processing
+    model = "gemini-1.5-flash-latest"
+    api_key = "your_gemini_api_key_here"
+
+    # OCR-specific LLM settings
+    [llm.ocr]
+    mistral_api_key = "your_mistral_api_key_here"  # For Pixtral OCR
+    gemini_api_key = "your_gemini_api_key_here"   # For Gemini Vision
+    openai_api_key = "your_openai_api_key_here"   # For GPT-4o Vision
+    anthropic_api_key = "your_claude_api_key_here" # For Claude Vision
+
+    # OCR processing settings
     [ocr]
-    # Primary OCR method: "easyocr", "mistral", or "hybrid"
-    primary_method = "easyocr"
-
-    # EasyOCR settings
-    easyocr_enabled = true
-    gpu_enabled = true  # Set to false if no GPU available
-    languages = ["en"]  # Add more languages: ["en", "es", "fr", etc.]
-
-    # Fallback settings
-    fallback_enabled = true  # Use Mistral if EasyOCR fails
-    confidence_threshold = 0.5  # Minimum confidence for EasyOCR results
+    primary_method = "gemini"  # gemini, mistral, openai, anthropic
+    fallback_enabled = true    # Use other methods if primary fails
+    confidence_threshold = 0.7 # Minimum confidence for results
     ```
 
     **Environment Variables (override config.toml):**
-    - `EASYOCR_ENABLED=true`
-    - `EASYOCR_GPU=true` 
+    - `GEMINI_API_KEY=your_api_key_here`
     - `MISTRAL_API_KEY=your_api_key_here`
+    - `OPENAI_API_KEY=your_api_key_here`
+    - `ANTHROPIC_API_KEY=your_api_key_here`
 
     **Performance Tips:**
-    - 🔥 **EasyOCR + GPU**: Best performance and accuracy
-    - ☁️ **Mistral Fallback**: Handles difficult/low-quality documents
+    - 🔥 **Gemini 1.5 Flash**: Fast and cost-effective for most documents
+    - ☁️ **Mistral Pixtral**: Specialized for complex layouts and tables
+    - 🚀 **GPT-4o Vision**: Highest accuracy for challenging documents
+    - 🤖 **Claude 3.5 Sonnet**: Excellent for structured document analysis
     - 💾 **Save to Disk**: Enable for backup and analysis
-    - 🎯 **Confidence Threshold**: 0.5 is optimal for most documents
+    - 🎯 **Multiple Methods**: Use fallback for maximum reliability
     """)
 
 # --- Performance Metrics Display ---
 if st.session_state.get('last_ocr_results'):
     st.markdown("---")
-    st.header("5. Last OCR Performance")
+    st.header("5. Last LLM OCR Performance")
 
     last_results = st.session_state['last_ocr_results']
 
@@ -741,7 +762,7 @@ if st.session_state.get('last_ocr_results'):
         st.metric("Total Time", f"{total_time:.1f}s")
 
     # Method breakdown
-    st.subheader("OCR Method Usage")
+    st.subheader("LLM OCR Method Usage")
     method_counts = {}
     for result in last_results:
         method = result.get('method_used', 'unknown')

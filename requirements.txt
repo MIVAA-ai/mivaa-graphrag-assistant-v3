@@ -1,50 +1,86 @@
-# =================================================================
-# MIVAA GraphRAG Assistant v3 - LLM OCR Optimized Dependencies
-# =================================================================
-
 # LLM Providers (Core OCR Engine)
-google-generativeai>=0.3.0    # Gemini 1.5 Flash - Primary OCR
-openai>=1.0.0                 # GPT-4o Vision - High Quality OCR
-anthropic>=0.8.0              # Claude 3.5 Sonnet - Alternative OCR
-mistralai>=0.1.0              # Pixtral - Specialized OCR (Optional)
+google-generativeai>=0.8.0    # Gemini 1.5 Flash/Pro - Primary OCR & Text Processing
+openai>=1.35.0                # GPT-4o/4o-mini Vision - High Quality OCR
+anthropic>=0.28.0             # Claude 3.5 Sonnet/Haiku - Alternative OCR
+mistralai>=1.0.0              # Pixtral & Le Chat - Specialized OCR
 
 # Document Processing (LLM OCR Pipeline)
-pillow>=9.0.0                 # Image processing for LLM input
-PyMuPDF>=1.23.0               # PDF to image conversion
-toml>=0.10.0                  # Configuration management
+pillow>=10.3.0                # Image processing and manipulation
+PyMuPDF>=1.24.0               # PDF to image conversion (fitz)
+pymupdf>=1.24.0               # Alternative PyMuPDF installation name
+toml>=0.10.0                  # TOML configuration management
+tomli>=2.0.1                  # TOML parser for Python <3.11 compatibility
+fitz
 
 # Database & Vector Storage
-neo4j>=5.0.0                  # Knowledge graph database
-chromadb>=0.4.0               # Vector embeddings storage
-sentence-transformers>=2.2.0  # Text embeddings for GraphRAG
+neo4j>=5.19.0                 # Knowledge graph database
+chromadb>=0.5.0               # Vector embeddings storage with enhanced features
+sentence-transformers>=3.0.0  # Text embeddings for GraphRAG
 
-# Web Framework
-streamlit>=1.28.0             # Main application interface
+# Web Framework & UI
+streamlit>=1.35.0             # Main application interface
 
-# Text Processing & Knowledge Graph
-langchain-text-splitters>=0.0.1  # Text chunking for GraphRAG
-llama-index>=0.9.0            # Knowledge graph construction
-tiktoken>=0.5.0               # Token counting for LLM usage
-spacy>=3.4.0                  # NLP processing for GraphRAG pipeline
+# Knowledge Graph & Text Processing
+langchain-text-splitters>=0.2.0  # Advanced text chunking for GraphRAG
+llama-index>=0.10.0           # Knowledge graph construction and querying
+llama-index-llms-gemini>=0.1.0  # Gemini integration for LlamaIndex
+tiktoken>=0.7.0               # Token counting for LLM usage optimization
+spacy>=3.7.0                  # Advanced NLP processing
 
-# Data Processing
-numpy>=1.24.0                 # Numerical operations
-pandas>=2.0.0                 # Data manipulation and analysis
-networkx>=3.0                 # Graph algorithms and analysis
+# Data Processing & Analysis
+numpy>=1.26.0                 # Numerical operations and array processing
+pandas>=2.2.0                 # Data manipulation and analysis
+openpyxl>=3.1.0               # Excel file support for data export
+networkx>=3.3                 # Graph algorithms and network analysis
 
-# Graph Visualization
-pyvis>=0.3.0                  # Interactive network visualization
+# Graph Visualization & Export
+pyvis>=0.3.2                  # Interactive network visualization
+matplotlib>=3.8.0             # Static plotting and visualization
+plotly>=5.20.0                # Interactive plotting and dashboards
 
-# Async Support
-nest-asyncio>=1.5.0           # Async support for Streamlit
+# Async & Performance
+nest-asyncio>=1.6.0           # Async support for Streamlit apps
+asyncio>=3.4.3                # Enhanced async operations
 
 # Environment & Configuration
 python-dotenv>=1.0.0          # Environment variables management
+configparser>=6.0.0           # INI configuration file support
 
-# HTTP Requests
-requests>=2.31.0              # HTTP client for API calls
+# HTTP & API Clients
+requests>=2.32.0              # HTTP client for API calls
+httpx>=0.27.0                 # Modern async HTTP client
 
-# Community Detection for Graph Analysis
+# Text Processing & Analysis
+beautifulsoup4>=4.12.0        # HTML/XML parsing for document processing
+lxml>=5.2.0                   # XML/HTML parser backend
+textstat>=0.7.3               # Text readability and complexity analysis
+
+# Community Detection & Graph Analysis
 python-louvain>=0.16          # Community detection algorithms
+igraph>=0.11.0                # Advanced graph analysis library
 
-jinja2>=3.0.0
+# Template Engine
+jinja2>=3.1.0                 # Template engine for report generation
+
+# Image Processing (For LLM OCR preprocessing)
+opencv-python>=4.9.0         # Computer vision for image preprocessing
+
+# Data Validation & Schema
+pydantic>=2.7.0               # Data validation and settings management
+jsonschema>=4.22.0            # JSON schema validation
+
+# Security & Encryption (for sensitive data handling)
+cryptography>=42.0.0          # Encryption for sensitive configuration data
+
+# Logging & Monitoring
+loguru>=0.7.0                 # Enhanced logging capabilities
+
+# Memory Optimization
+psutil>=5.9.0                 # System and process utilities for monitoring
+
+# File Format Support
+python-magic>=0.4.27          # File type detection
+chardet>=5.2.0                # Character encoding detection
+
+
+

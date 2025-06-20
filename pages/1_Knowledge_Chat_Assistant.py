@@ -1,6 +1,7 @@
 # pages/1_Knowledge_Chat_Assistant.py
 
 import streamlit as st
+# st.set_page_config(page_title="Knowledge Chat Assistant")
 import asyncio
 import logging
 import json
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 import time # Keep if used
 
-st.set_page_config(page_title="Knowledge Chat Assistant")
+
 
 # Logger setup
 logger = logging.getLogger(__name__)

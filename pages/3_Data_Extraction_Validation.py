@@ -1,11 +1,11 @@
 # pages/3_Data_Extraction_Validation.py
 
 import streamlit as st
+# st.set_page_config(page_title="Data Extraction Validation")
 import time
 import logging
 import pandas as pd
 from typing import List, Any, Dict
-st.set_page_config(page_title="Data Extraction Validation")
 
 # Import your existing components
 try:
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 st.title("🔍 Pipeline Validation & Quality Check")
 st.write("Test your document processing pipeline accuracy before running full ingestion jobs.")
-
 
 # Load configuration and resources
 @st.cache_resource

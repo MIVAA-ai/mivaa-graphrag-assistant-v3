@@ -7,19 +7,19 @@ import json
 import zipfile
 import io
 from datetime import datetime
-st.set_page_config(page_title="Processed Files Manager")
 
 # Import your components
 try:
     from GraphRAG_Document_AI_Platform import load_config, get_mistral_client, get_enhanced_ocr_pipeline
     from src.utils.ocr_storage import create_storage_manager
-    from src.utils.processing_pipeline import process_uploaded_file_ocr_with_storage, process_batch_with_enhanced_storage
+    from src.utils.processing_pipeline import process_uploaded_file_ocr_with_storage, \
+        process_batch_with_enhanced_storage
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
 
-st.title("💾 OCR Output Storage & Management")
-st.write("Save, manage, and export your OCR extraction results to local storage.")
+st.title("💾 LLM OCR Output Storage & Management")
+st.write("Save, manage, and export your LLM OCR extraction results to local storage.")
 
 
 # Initialize storage manager
@@ -34,7 +34,7 @@ storage_manager = get_storage_manager()
 config = load_config()
 mistral_client = get_mistral_client(config.get('MISTRAL_API_KEY'))
 
-# ✅ FIX: Get the enhanced OCR pipeline
+# Get the enhanced LLM OCR pipeline
 enhanced_ocr_pipeline = get_enhanced_ocr_pipeline(config)
 
 # Main tabs
@@ -51,7 +51,7 @@ with tab1:
             "Upload documents to extract text and save locally:",
             type=["pdf", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
-            help="Files will be processed with OCR and saved to your local drive"
+            help="Files will be processed with LLM OCR and saved to your local drive"
         )
 
     with col2:
@@ -66,11 +66,31 @@ with tab1:
 
         with col1:
             save_to_disk = st.checkbox("💾 Save to Local Disk", value=True,
-                                       help="Save OCR output and metadata to local files")
+                                       help="Save LLM OCR output and metadata to local files")
 
         with col2:
             extract_fields = st.checkbox("🔍 Extract Structured Fields", value=True,
                                          help="Extract invoice numbers, dates, amounts, etc.")
+
+        # Show available LLM OCR methods
+        if enhanced_ocr_pipeline:
+            st.subheader("🤖 Available LLM OCR Methods")
+            available_methods = []
+
+            if enhanced_ocr_pipeline.mistral_client:
+                available_methods.append("☁️ **Mistral Pixtral** - Specialized OCR & Vision")
+            if hasattr(enhanced_ocr_pipeline, 'gemini_client') and enhanced_ocr_pipeline.gemini_client:
+                available_methods.append("🔥 **Gemini 1.5 Flash** - High-quality vision processing")
+            if hasattr(enhanced_ocr_pipeline, 'openai_client') and enhanced_ocr_pipeline.openai_client:
+                available_methods.append("🚀 **GPT-4o Vision** - Premium OCR accuracy")
+            if hasattr(enhanced_ocr_pipeline, 'anthropic_client') and enhanced_ocr_pipeline.anthropic_client:
+                available_methods.append("🤖 **Claude 3.5 Sonnet** - Advanced document analysis")
+
+            if available_methods:
+                for method in available_methods:
+                    st.success(method)
+            else:
+                st.warning("⚠️ No LLM OCR methods available. Check your API keys in config.toml")
 
         if st.button("🚀 Process Files & Save", type="primary"):
 
@@ -78,10 +98,10 @@ with tab1:
             status_text = st.empty()
             results_container = st.container()
 
-            with st.spinner("Processing files..."):
+            with st.spinner("Processing files with LLM OCR..."):
 
                 try:
-                    # ✅ FIX: Now enhanced_ocr_pipeline is properly defined
+                    # Use enhanced LLM OCR pipeline
                     batch_results = process_batch_with_enhanced_storage(
                         uploaded_files=uploaded_files,
                         enhanced_ocr_pipeline=enhanced_ocr_pipeline,
@@ -93,7 +113,7 @@ with tab1:
 
                     # Display results
                     with results_container:
-                        st.subheader("📋 Processing Results")
+                        st.subheader("📋 LLM OCR Processing Results")
 
                         # Summary metrics
                         successful = sum(1 for r in batch_results if r['success'])
@@ -113,10 +133,14 @@ with tab1:
                         # Results table
                         results_data = []
                         for result in batch_results:
+                            method_used = result.get('method_used', 'unknown')
                             results_data.append({
                                 'Filename': result['original_filename'],
                                 'Status': 'Success' if result['success'] else 'Failed',
+                                'LLM Method': method_used.upper() if method_used != 'unknown' else 'N/A',
                                 'Text Length': f"{result.get('text_length', 0):,}",
+                                'Confidence': f"{result.get('confidence', 0.0):.3f}",
+                                'Processing Time': f"{result.get('processing_time', 0.0):.2f}s",
                                 'Saved Files': len(result.get('saved_files', {})) if save_to_disk else 'Not saved',
                                 'Error': result.get('error', result.get('save_error', ''))[:50] if not result[
                                     'success'] else ''
@@ -136,10 +160,10 @@ with tab1:
                                         st.write("---")
 
                 except Exception as e:
-                    st.error(f"Processing failed: {str(e)}")
+                    st.error(f"LLM OCR processing failed: {str(e)}")
 
 with tab2:
-    st.header("📁 Browse Saved OCR Files")
+    st.header("📁 Browse Saved LLM OCR Files")
 
     col1, col2 = st.columns([3, 1])
 
@@ -204,8 +228,19 @@ with tab2:
                     except Exception as e:
                         st.error(f"Could not display text: {e}")
 
+                # Show metadata if available
+                try:
+                    metadata_path = file_info['text_file_path'].replace('.txt', '_metadata.json')
+                    if Path(metadata_path).exists():
+                        with st.expander("🔍 View LLM OCR Metadata", expanded=False):
+                            with open(metadata_path, 'r', encoding='utf-8') as f:
+                                metadata = json.load(f)
+                            st.json(metadata)
+                except Exception as e:
+                    pass  # Metadata is optional
+
         else:
-            st.info("📝 No saved OCR files found. Process some documents in the 'Extract & Save' tab first.")
+            st.info("📝 No saved LLM OCR files found. Process some documents in the 'Extract & Save' tab first.")
 
     except Exception as e:
         st.error(f"Error loading saved files: {e}")
@@ -227,7 +262,7 @@ with tab3:
                     st.download_button(
                         "💾 Download CSV",
                         data=csv_data,
-                        file_name=f"ocr_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        file_name=f"llm_ocr_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv"
                     )
                 else:
@@ -249,7 +284,7 @@ with tab3:
                     st.download_button(
                         "💾 Download Excel File",
                         data=excel_data,
-                        file_name=f"ocr_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        file_name=f"llm_ocr_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
 
@@ -273,7 +308,7 @@ with tab3:
                     for text_file in storage_manager.text_dir.glob("*.txt"):
                         zip_file.write(text_file, f"text_files/{text_file.name}")
 
-                    # Add all JSON files
+                    # Add all JSON files (metadata)
                     for json_file in storage_manager.json_dir.glob("*.json"):
                         zip_file.write(json_file, f"metadata/{json_file.name}")
 
@@ -282,7 +317,7 @@ with tab3:
                 st.download_button(
                     "💾 Download ZIP Archive",
                     data=zip_buffer.getvalue(),
-                    file_name=f"ocr_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                    file_name=f"llm_ocr_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
                     mime="application/zip"
                 )
 
@@ -321,12 +356,41 @@ with tab4:
     except Exception as e:
         st.error(f"Could not calculate storage usage: {e}")
 
+    # LLM OCR Configuration Display
+    st.subheader("🤖 LLM OCR Configuration")
+
+    if enhanced_ocr_pipeline:
+        # Show available LLM methods
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write("**Available LLM OCR Methods:**")
+            if enhanced_ocr_pipeline.mistral_client:
+                st.success("☁️ Mistral Pixtral")
+            if hasattr(enhanced_ocr_pipeline, 'gemini_client') and enhanced_ocr_pipeline.gemini_client:
+                st.success("🔥 Gemini 1.5 Flash")
+            if hasattr(enhanced_ocr_pipeline, 'openai_client') and enhanced_ocr_pipeline.openai_client:
+                st.success("🚀 GPT-4o Vision")
+            if hasattr(enhanced_ocr_pipeline, 'anthropic_client') and enhanced_ocr_pipeline.anthropic_client:
+                st.success("🤖 Claude 3.5 Sonnet")
+
+        with col2:
+            st.write("**Configuration:**")
+            primary_method = getattr(enhanced_ocr_pipeline, 'primary_method', 'auto')
+            st.write(f"Primary Method: {primary_method.upper()}")
+            fallback_enabled = getattr(enhanced_ocr_pipeline, 'fallback_enabled', True)
+            st.write(f"Fallback: {'✅' if fallback_enabled else '❌'}")
+            confidence_threshold = getattr(enhanced_ocr_pipeline, 'confidence_threshold', 0.7)
+            st.write(f"Confidence Threshold: {confidence_threshold}")
+    else:
+        st.error("LLM OCR Pipeline not initialized")
+
     # Cleanup options
     st.subheader("🧹 Cleanup")
     st.warning("⚠️ Cleanup operations cannot be undone!")
 
     if st.button("🗑️ Clear All Saved Files", type="secondary"):
-        if st.checkbox("I understand this will delete all saved OCR files"):
+        if st.checkbox("I understand this will delete all saved LLM OCR files"):
             try:
                 import shutil
 
@@ -339,4 +403,5 @@ with tab4:
 
 # Footer
 st.markdown("---")
-st.caption("💡 All OCR outputs are saved locally in the `ocr_outputs/` directory relative to your app.")
+st.caption("💡 All LLM OCR outputs are saved locally in the `ocr_outputs/` directory relative to your app.")
+st.caption("🤖 Powered by advanced LLM vision models for high-quality document text extraction.")

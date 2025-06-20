@@ -1,16 +1,19 @@
-# enhanced_ocr_pipeline.py - LLM OCR REPLACEMENT VERSION
+# enhanced_ocr_pipeline.py - COMPLETE ENHANCED VERSION WITH METADATA
 
 import logging
 import tempfile
 import hashlib
 import base64
 import io
+import uuid
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import time
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
+from collections import Counter
 import warnings
 import os
 import threading
@@ -35,6 +38,21 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+# Entity extraction
+try:
+    import spacy
+
+    SPACY_AVAILABLE = True
+    # Load English model for entity detection
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except OSError:
+        nlp = None
+        logging.warning("spaCy English model not found. Install with: python -m spacy download en_core_web_sm")
+except ImportError:
+    SPACY_AVAILABLE = False
+    nlp = None
 
 # LLM Clients
 try:
@@ -96,7 +114,8 @@ class OCRMethod(Enum):
 
 @dataclass
 class OCRResult:
-    """OCR result structure - MAINTAINS EXACT SAME INTERFACE"""
+    """Enhanced OCR result structure with comprehensive metadata"""
+    # Core OCR results (existing)
     success: bool
     text: str
     confidence: float
@@ -109,6 +128,15 @@ class OCRResult:
     structured_data: Optional[Dict] = None
     detected_tables: Optional[List] = None
     invoice_fields: Optional[Dict] = None
+
+    # Enhanced metadata fields
+    file_metadata: Optional[Dict] = None
+    content_metadata: Optional[Dict] = None
+    quality_metrics: Optional[Dict] = None
+    detected_entities: Optional[Dict] = None
+    document_classification: Optional[Dict] = None
+    processing_metadata: Optional[Dict] = None
+    chunk_metadata: Optional[List[Dict]] = None
 
 
 class TimeoutHandler:
@@ -137,8 +165,8 @@ class TimeoutHandler:
 
 class LLMOCRExtractor:
     """
-    High-performance LLM-based OCR extractor with structured output
-    Replaces traditional OCR with superior accuracy and speed
+    Enhanced LLM-based OCR extractor with comprehensive metadata extraction
+    Replaces traditional OCR with superior accuracy and rich metadata
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -155,6 +183,12 @@ class LLMOCRExtractor:
         self.fallback_enabled = config.get('LLM_OCR_FALLBACK_ENABLED', True)
         self.timeout_seconds = config.get('LLM_OCR_TIMEOUT', 60)
         self.max_retries = config.get('LLM_OCR_MAX_RETRIES', 2)
+
+        # Enhanced metadata configuration
+        self.extract_entities = config.get('EXTRACT_ENTITIES', True)
+        self.classify_documents = config.get('CLASSIFY_DOCUMENTS', True)
+        self.analyze_quality = config.get('ANALYZE_QUALITY', True)
+        self.chunk_size = config.get('CHUNK_SIZE', 1000)
 
         # Initialize clients
         self._initialize_llm_clients()
@@ -233,6 +267,257 @@ class LLMOCRExtractor:
             except Exception as e:
                 logger.error(f"Failed to initialize Mistral: {e}")
                 self.mistral_client = None
+
+    def _generate_file_metadata(self, uploaded_file) -> Dict[str, Any]:
+        """Generate comprehensive file metadata"""
+        file_content = uploaded_file.getvalue()
+
+        return {
+            "file_id": str(uuid.uuid4()),
+            "original_filename": uploaded_file.name,
+            "file_hash": hashlib.sha256(file_content).hexdigest(),
+            "file_size_bytes": len(file_content),
+            "mime_type": uploaded_file.type,
+            "upload_timestamp": datetime.now().isoformat(),
+            "file_extension": Path(uploaded_file.name).suffix.lower(),
+        }
+
+    def _extract_entities_from_text(self, text: str) -> Dict[str, List[str]]:
+        """Extract named entities from text using spaCy and domain patterns"""
+        if not text.strip():
+            return {}
+
+        entities = {
+            "companies": [],
+            "people": [],
+            "locations": [],
+            "dates": [],
+            "money": [],
+            "organizations": [],
+            "wells": [],  # Oil & Gas specific
+            "formations": [],  # Oil & Gas specific
+            "equipment": [],  # Oil & Gas specific
+        }
+
+        # Use spaCy if available
+        if nlp:
+            try:
+                doc = nlp(text)
+
+                # Extract standard entities
+                for ent in doc.ents:
+                    if ent.label_ in ["ORG"]:
+                        entities["companies"].append(ent.text.strip())
+                    elif ent.label_ in ["PERSON"]:
+                        entities["people"].append(ent.text.strip())
+                    elif ent.label_ in ["GPE", "LOC"]:
+                        entities["locations"].append(ent.text.strip())
+                    elif ent.label_ in ["DATE"]:
+                        entities["dates"].append(ent.text.strip())
+                    elif ent.label_ in ["MONEY"]:
+                        entities["money"].append(ent.text.strip())
+
+            except Exception as e:
+                logger.warning(f"spaCy entity extraction failed: {e}")
+
+        # Extract domain-specific entities (Oil & Gas) using patterns
+        try:
+            well_patterns = [
+                r'\b[A-Z]{1,3}[-\s]?\d{1,4}[A-Z]?\b',  # Well names like A-1, B-12A
+                r'\bWell\s+[A-Z0-9\-]+\b',  # "Well ABC-123"
+                r'\b\w+[-\s]\d+[A-Z]?\s+Well\b',  # "Smith-1A Well"
+            ]
+
+            formation_patterns = [
+                r'\b\w+\s+Formation\b',  # "Daman Formation"
+                r'\b\w+\s+Sand\b',  # "Uinta Sand"
+                r'\b\w+\s+Shale\b',  # "Bakken Shale"
+                r'\b\w+\s+Limestone\b',  # "Austin Limestone"
+            ]
+
+            equipment_patterns = [
+                r'\bdrilling\s+rig\b',
+                r'\bcompletion\s+tools?\b',
+                r'\bpump\s+jack\b',
+                r'\bblowout\s+preventer\b',
+                r'\bchristmas\s+tree\b',
+                r'\bperforation\s+gun\b',
+                r'\bdownhole\s+motor\b',
+            ]
+
+            # Apply domain-specific patterns
+            for pattern in well_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                entities["wells"].extend([m.strip() for m in matches])
+
+            for pattern in formation_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                entities["formations"].extend([m.strip() for m in matches])
+
+            for pattern in equipment_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                entities["equipment"].extend([m.strip() for m in matches])
+
+        except Exception as e:
+            logger.warning(f"Pattern-based entity extraction failed: {e}")
+
+        # Remove duplicates and limit count
+        for key in entities:
+            entities[key] = list(set(entities[key]))[:10]  # Limit to 10 per type
+
+        # Remove empty lists
+        entities = {k: v for k, v in entities.items() if v}
+
+        return entities
+
+    def _classify_document_type(self, text: str, filename: str) -> Dict[str, Any]:
+        """Classify document type based on content and filename"""
+        text_lower = text.lower()
+        filename_lower = filename.lower()
+
+        # Document type indicators
+        type_indicators = {
+            "invoice": ["invoice", "bill", "payment", "amount due", "total:", "$", "invoice #", "invoice number"],
+            "contract": ["agreement", "contract", "terms and conditions", "party", "whereas", "hereby", "witnesseth"],
+            "report": ["report", "analysis", "summary", "findings", "conclusion", "executive summary"],
+            "letter": ["dear", "sincerely", "regards", "letter", "correspondence", "yours truly"],
+            "form": ["form", "application", "submit", "signature", "date:", "name:", "please fill"],
+            "technical": ["specification", "procedure", "technical", "engineering", "design", "specifications"],
+            "drilling_report": ["drilling", "wellbore", "completion", "production", "reservoir", "mud log"],
+            "geological_report": ["formation", "geology", "seismic", "core", "log", "lithology", "stratigraphy"],
+            "financial": ["balance sheet", "income statement", "cash flow", "revenue", "expenses", "profit"],
+            "legal": ["legal", "lawsuit", "court", "attorney", "law", "jurisdiction", "plaintiff"],
+        }
+
+        # Calculate scores for each document type
+        scores = {}
+        for doc_type, indicators in type_indicators.items():
+            score = sum(1 for indicator in indicators if indicator in text_lower)
+            # Add filename bonus
+            if any(word in filename_lower for word in indicators[:3]):  # Check first 3 indicators
+                score += 2
+            scores[doc_type] = score
+
+        # Determine primary type
+        if max(scores.values()) == 0:
+            primary_type = "unknown"
+            confidence = 0.0
+        else:
+            primary_type = max(scores.keys(), key=lambda k: scores[k])
+            # Normalize confidence by text length
+            confidence = min(scores[primary_type] / max(len(text.split()) / 100, 1), 1.0)
+
+        return {
+            "document_type": primary_type,
+            "classification_confidence": confidence,
+            "type_scores": scores,
+            "category": self._get_document_category(primary_type)
+        }
+
+    def _get_document_category(self, doc_type: str) -> str:
+        """Map document type to broader category"""
+        category_mapping = {
+            "invoice": "financial",
+            "contract": "legal",
+            "report": "technical",
+            "drilling_report": "technical",
+            "geological_report": "technical",
+            "letter": "correspondence",
+            "form": "administrative",
+            "technical": "technical",
+            "financial": "financial",
+            "legal": "legal"
+        }
+        return category_mapping.get(doc_type, "general")
+
+    def _analyze_text_quality(self, text: str, confidence: float) -> Dict[str, Any]:
+        """Analyze text quality metrics"""
+        if not text.strip():
+            return {
+                "quality_score": 0.0,
+                "readability_score": 0.0,
+                "complexity": "unknown",
+                "issues": ["empty_text"]
+            }
+
+        words = text.split()
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # Basic quality indicators
+        avg_word_length = sum(len(word) for word in words) / len(words) if words else 0
+        avg_sentence_length = sum(len(sentence.split()) for sentence in sentences) / len(sentences) if sentences else 0
+
+        # Quality issues detection
+        issues = []
+        if confidence < 0.7:
+            issues.append("low_ocr_confidence")
+        if avg_word_length < 3:
+            issues.append("short_words")
+        if len(words) < 10:
+            issues.append("insufficient_text")
+        if re.search(r'[^\w\s\.,!?;:\-\(\)\"\']+', text):
+            issues.append("special_characters")
+        if len(sentences) < 2:
+            issues.append("few_sentences")
+
+        # Calculate overall quality score
+        quality_factors = [
+            confidence,  # OCR confidence
+            min(len(words) / 100, 1.0),  # Text length factor
+            min(avg_word_length / 5, 1.0),  # Word length factor
+            1.0 - (len(issues) * 0.15)  # Issue penalty
+        ]
+
+        quality_score = max(0.0, sum(quality_factors) / len(quality_factors))
+
+        # Complexity assessment
+        if avg_sentence_length > 20 and avg_word_length > 5:
+            complexity = "high"
+        elif avg_sentence_length > 15 or avg_word_length > 4:
+            complexity = "medium"
+        else:
+            complexity = "low"
+
+        # Simple readability score (Flesch-like)
+        readability = max(0.0, min(100.0, 206.835 - (1.015 * avg_sentence_length) - (84.6 * (avg_word_length / 4.7))))
+
+        return {
+            "quality_score": quality_score,
+            "readability_score": readability,
+            "complexity": complexity,
+            "avg_word_length": avg_word_length,
+            "avg_sentence_length": avg_sentence_length,
+            "issues": issues,
+            "word_count": len(words),
+            "sentence_count": len(sentences),
+            "character_count": len(text)
+        }
+
+    def _create_chunk_metadata(self, text: str) -> List[Dict[str, Any]]:
+        """Create metadata for text chunks"""
+        if not text.strip():
+            return []
+
+        chunks = []
+        words = text.split()
+
+        # Simple word-based chunking
+        for i in range(0, len(words), self.chunk_size):
+            chunk_words = words[i:i + self.chunk_size]
+            chunk_text = ' '.join(chunk_words)
+
+            chunk_metadata = {
+                "chunk_id": f"chunk_{i // self.chunk_size}",
+                "chunk_text": chunk_text,
+                "start_word": i,
+                "end_word": min(i + self.chunk_size, len(words)),
+                "word_count": len(chunk_words),
+                "character_count": len(chunk_text)
+            }
+            chunks.append(chunk_metadata)
+
+        return chunks
 
     def _convert_file_to_image(self, uploaded_file) -> bytes:
         """Convert uploaded file to image bytes for LLM processing"""
@@ -635,51 +920,13 @@ This is for business document processing - perfect accuracy required."""
             methods.append("mistral")
         return methods
 
-    def extract_text(self, uploaded_file, save_to_disk: bool = True) -> OCRResult:
-        """
-        MAIN EXTRACTION METHOD - Maintains exact same interface as original
-        """
-        file_name = uploaded_file.name
-        file_type = uploaded_file.type
-
-        logger.info(f"Starting LLM OCR extraction for {file_name} (type: {file_type})")
-
-        # Handle text files directly
-        if file_type in ['text/plain', 'text/csv', 'text/html', 'text/xml']:
-            return self._handle_text_file_directly(uploaded_file, save_to_disk)
-
-        # Convert file to image
-        try:
-            image_data = self._convert_file_to_image(uploaded_file)
-        except Exception as e:
-            logger.error(f"Failed to convert {file_name} to image: {e}")
-            return OCRResult(
-                success=False,
-                text="",
-                confidence=0.0,
-                method_used="conversion_failed",
-                processing_time=0.0,
-                text_regions_detected=0,
-                preprocessing_applied=[],
-                error_message=f"File conversion failed: {str(e)}"
-            )
-
+    def _perform_ocr_extraction(self, image_data: bytes, file_name: str, file_metadata: Dict) -> OCRResult:
+        """Perform OCR extraction using available methods"""
         # Get available methods
         available_methods = self._get_available_methods()
-        logger.info(f"Available LLM methods: {available_methods}")
 
         if not available_methods:
-            logger.error("No LLM clients available for OCR")
-            return OCRResult(
-                success=False,
-                text="",
-                confidence=0.0,
-                method_used="no_methods",
-                processing_time=0.0,
-                text_regions_detected=0,
-                preprocessing_applied=[],
-                error_message="No LLM clients available"
-            )
+            return self._create_failed_result(file_metadata, "No LLM clients available")
 
         # Determine extraction order
         if self.primary_method in available_methods:
@@ -709,37 +956,10 @@ This is for business document processing - perfect accuracy required."""
                     logger.warning(f"Unknown method: {method}")
                     continue
 
-                # If successful, save and return
+                # If successful, return with file metadata
                 if result.success and len(result.text.strip()) > 0:
+                    result.file_metadata = file_metadata
                     logger.info(f"{method.upper()} extraction successful for {file_name}")
-
-                    # Save to disk if requested
-                    if save_to_disk and self._storage_manager:
-                        try:
-                            ocr_metadata = {
-                                'llm_method': result.method_used,
-                                'confidence': result.confidence,
-                                'processing_time': result.processing_time,
-                                'text_length': len(result.text),
-                                'extracted_at': datetime.now().isoformat(),
-                                'file_info': {
-                                    'name': file_name,
-                                    'type': file_type,
-                                    'size': len(uploaded_file.getvalue())
-                                }
-                            }
-
-                            saved_files = self._storage_manager.save_ocr_output(
-                                uploaded_file=uploaded_file,
-                                ocr_text=result.text,
-                                structured_data=ocr_metadata
-                            )
-                            result.saved_files = saved_files
-                            logger.info(f"OCR output saved for {file_name}")
-
-                        except Exception as e:
-                            logger.error(f"Failed to save OCR output: {e}")
-
                     return result
                 else:
                     logger.warning(f"{method.upper()} extraction failed or returned empty text")
@@ -751,20 +971,131 @@ This is for business document processing - perfect accuracy required."""
                 continue
 
         # All methods failed
-        logger.error(f"All LLM OCR methods failed for {file_name}")
+        return self._create_failed_result(file_metadata, f"All extraction methods failed. Last error: {last_error}")
+
+    def _enhance_result_with_metadata(self, result: OCRResult, file_metadata: Dict):
+        """Add comprehensive metadata to OCR result"""
+        text = result.text
+
+        # Extract entities if enabled
+        if self.extract_entities:
+            result.detected_entities = self._extract_entities_from_text(text)
+
+        # Classify document if enabled
+        if self.classify_documents:
+            result.document_classification = self._classify_document_type(text, file_metadata["original_filename"])
+
+        # Analyze quality if enabled
+        if self.analyze_quality:
+            result.quality_metrics = self._analyze_text_quality(text, result.confidence)
+
+        # Create content metadata
+        result.content_metadata = {
+            "word_count": len(text.split()),
+            "character_count": len(text),
+            "paragraph_count": len([p for p in text.split('\n\n') if p.strip()]),
+            "line_count": len(text.split('\n')),
+            "has_tables": bool(result.detected_tables),
+            "has_financial_data": bool(result.invoice_fields),
+            "language_detected": "en",  # Could be enhanced with language detection
+        }
+
+        # Create processing metadata
+        result.processing_metadata = {
+            "extraction_timestamp": datetime.now().isoformat(),
+            "pipeline_version": "v2.1.0",
+            "entity_extraction_enabled": self.extract_entities,
+            "classification_enabled": self.classify_documents,
+            "quality_analysis_enabled": self.analyze_quality,
+        }
+
+        # Create chunk metadata
+        result.chunk_metadata = self._create_chunk_metadata(text)
+
+        logger.info(f"Enhanced metadata added for {file_metadata['original_filename']}")
+
+    def _create_failed_result(self, file_metadata: Dict, error_message: str, processing_time: float = 0.0) -> OCRResult:
+        """Create a failed OCR result with metadata"""
         return OCRResult(
             success=False,
             text="",
             confidence=0.0,
-            method_used="all_failed",
-            processing_time=0.0,
+            method_used="failed",
+            processing_time=processing_time,
             text_regions_detected=0,
             preprocessing_applied=[],
-            error_message=f"All extraction methods failed. Last error: {last_error}"
+            error_message=error_message,
+            file_metadata=file_metadata
         )
 
-    def _handle_text_file_directly(self, uploaded_file, save_to_disk: bool) -> OCRResult:
-        """Handle text files directly - maintains original interface"""
+    def _save_enhanced_result(self, uploaded_file, result: OCRResult):
+        """Save OCR result with enhanced metadata"""
+        try:
+            enhanced_metadata = {
+                'file_metadata': result.file_metadata,
+                'content_metadata': result.content_metadata,
+                'quality_metrics': result.quality_metrics,
+                'detected_entities': result.detected_entities,
+                'document_classification': result.document_classification,
+                'processing_metadata': result.processing_metadata,
+                'chunk_metadata': result.chunk_metadata,
+                'ocr_info': {
+                    'method_used': result.method_used,
+                    'confidence': result.confidence,
+                    'processing_time': result.processing_time,
+                    'text_length': len(result.text)
+                }
+            }
+
+            saved_files = self._storage_manager.save_ocr_output(
+                uploaded_file=uploaded_file,
+                ocr_text=result.text,
+                structured_data=enhanced_metadata
+            )
+            result.saved_files = saved_files
+            logger.info(f"Enhanced OCR output saved with metadata")
+
+        except Exception as e:
+            logger.error(f"Failed to save enhanced OCR output: {e}")
+
+    def extract_text(self, uploaded_file, save_to_disk: bool = True) -> OCRResult:
+        """
+        Enhanced main extraction method with comprehensive metadata
+        """
+        file_name = uploaded_file.name
+        file_type = uploaded_file.type
+
+        logger.info(f"Starting enhanced LLM OCR extraction for {file_name} (type: {file_type})")
+
+        # Generate file metadata
+        file_metadata = self._generate_file_metadata(uploaded_file)
+
+        # Handle text files directly
+        if file_type in ['text/plain', 'text/csv', 'text/html', 'text/xml']:
+            return self._handle_text_file_with_metadata(uploaded_file, file_metadata, save_to_disk)
+
+        # Convert file to image
+        try:
+            image_data = self._convert_file_to_image(uploaded_file)
+        except Exception as e:
+            logger.error(f"Failed to convert {file_name} to image: {e}")
+            return self._create_failed_result(file_metadata, f"File conversion failed: {str(e)}")
+
+        # Perform OCR extraction
+        result = self._perform_ocr_extraction(image_data, file_name, file_metadata)
+
+        # If extraction successful, add enhanced metadata
+        if result.success and result.text.strip():
+            self._enhance_result_with_metadata(result, file_metadata)
+
+        # Save enhanced result if requested
+        if save_to_disk and self._storage_manager and result.success:
+            self._save_enhanced_result(uploaded_file, result)
+
+        return result
+
+    def _handle_text_file_with_metadata(self, uploaded_file, file_metadata: Dict, save_to_disk: bool) -> OCRResult:
+        """Handle text files with enhanced metadata"""
         start_time = time.time()
         file_name = uploaded_file.name
 
@@ -795,27 +1126,16 @@ This is for business document processing - perfect accuracy required."""
                 method_used="direct_text",
                 processing_time=processing_time,
                 text_regions_detected=1,
-                preprocessing_applied=["direct_text_extraction"]
+                preprocessing_applied=["direct_text_extraction"],
+                file_metadata=file_metadata
             )
+
+            # Add enhanced metadata
+            self._enhance_result_with_metadata(result, file_metadata)
 
             # Save to disk if requested
             if save_to_disk and self._storage_manager:
-                try:
-                    ocr_metadata = {
-                        'file_type': 'text',
-                        'processing_method': 'direct_text_extraction',
-                        'extracted_at': datetime.now().isoformat()
-                    }
-
-                    saved_files = self._storage_manager.save_ocr_output(
-                        uploaded_file=uploaded_file,
-                        ocr_text=result.text,
-                        structured_data=ocr_metadata
-                    )
-                    result.saved_files = saved_files
-                    logger.info(f"Text file output saved")
-                except Exception as e:
-                    logger.error(f"Failed to save text file output: {e}")
+                self._save_enhanced_result(uploaded_file, result)
 
             return result
 
@@ -823,16 +1143,7 @@ This is for business document processing - perfect accuracy required."""
             processing_time = time.time() - start_time
             logger.error(f"Failed to process text file {file_name}: {e}")
 
-            return OCRResult(
-                success=False,
-                text="",
-                confidence=0.0,
-                method_used="direct_text",
-                processing_time=processing_time,
-                text_regions_detected=0,
-                preprocessing_applied=[],
-                error_message=f"Text file processing failed: {str(e)}"
-            )
+            return self._create_failed_result(file_metadata, f"Text file processing failed: {str(e)}", processing_time)
 
     # COMPATIBILITY METHODS - Maintain exact same interface as original
     def set_mistral_client(self, mistral_client):
@@ -850,26 +1161,6 @@ This is for business document processing - perfect accuracy required."""
         return None
 
     @property
-    def primary_method(self):
-        """Return current primary method"""
-        return self._primary_method
-
-    @primary_method.setter
-    def primary_method(self, value):
-        """Set primary method"""
-        self._primary_method = value
-
-    @property
-    def fallback_enabled(self):
-        """Return fallback status"""
-        return self._fallback_enabled
-
-    @fallback_enabled.setter
-    def fallback_enabled(self, value):
-        """Set fallback status"""
-        self._fallback_enabled = value
-
-    @property
     def confidence_threshold(self):
         """Return confidence threshold"""
         return self.config.get('LLM_OCR_CONFIDENCE_THRESHOLD', 0.7)
@@ -881,9 +1172,9 @@ This is for business document processing - perfect accuracy required."""
 
 class EnhancedOCRPipeline:
     """
-    BACKWARD COMPATIBILITY WRAPPER
+    BACKWARD COMPATIBILITY WRAPPER with Enhanced Metadata
     Drop-in replacement for the original EnhancedOCRPipeline
-    Maintains exact same interface while using superior LLM OCR
+    Maintains exact same interface while using superior LLM OCR with metadata
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -907,7 +1198,7 @@ class EnhancedOCRPipeline:
         # Storage manager
         self.ocr_storage = self.llm_extractor._storage_manager
 
-        logger.info("EnhancedOCRPipeline initialized with LLM OCR backend")
+        logger.info("Enhanced OCR Pipeline initialized with LLM OCR backend and metadata extraction")
 
         # Log available providers
         available = self.llm_extractor.get_available_providers()
@@ -934,7 +1225,7 @@ class EnhancedOCRPipeline:
 
     def extract_text(self, uploaded_file, save_to_disk: bool = True) -> OCRResult:
         """
-        MAIN EXTRACTION METHOD
+        MAIN EXTRACTION METHOD with Enhanced Metadata
         Maintains exact same interface as original EnhancedOCRPipeline
         """
         return self.llm_extractor.extract_text(uploaded_file, save_to_disk)
@@ -961,14 +1252,153 @@ class EnhancedOCRPipeline:
             'total_providers': len(available_providers),
             'confidence_threshold': self.confidence_threshold,
             'storage_available': self.ocr_storage is not None,
-            'backend_type': 'LLM_OCR'
+            'backend_type': 'LLM_OCR_ENHANCED',
+            'metadata_features': {
+                'entity_extraction': self.llm_extractor.extract_entities,
+                'document_classification': self.llm_extractor.classify_documents,
+                'quality_analysis': self.llm_extractor.analyze_quality,
+                'chunk_creation': True
+            }
         }
 
 
-# FACTORY FUNCTIONS - Maintain backward compatibility
+# ENHANCED EXPORT FUNCTIONS
+
+def export_for_vector_db(ocr_result: OCRResult) -> Dict[str, Any]:
+    """Export OCR result in format suitable for vector database"""
+    if not ocr_result.success:
+        return {}
+
+    return {
+        'text': ocr_result.text,
+        'file_id': ocr_result.file_metadata.get('file_id') if ocr_result.file_metadata else None,
+        'original_filename': ocr_result.file_metadata.get('original_filename') if ocr_result.file_metadata else None,
+        'file_type': ocr_result.file_metadata.get('mime_type') if ocr_result.file_metadata else None,
+        'file_size_bytes': ocr_result.file_metadata.get('file_size_bytes') if ocr_result.file_metadata else None,
+        'file_hash': ocr_result.file_metadata.get('file_hash') if ocr_result.file_metadata else None,
+        'method_used': ocr_result.method_used,
+        'confidence': ocr_result.confidence,
+        'processing_time': ocr_result.processing_time,
+        'document_type': ocr_result.document_classification.get(
+            'document_type') if ocr_result.document_classification else None,
+        'document_category': ocr_result.document_classification.get(
+            'category') if ocr_result.document_classification else None,
+        'classification_confidence': ocr_result.document_classification.get(
+            'classification_confidence') if ocr_result.document_classification else None,
+        'language_detected': ocr_result.content_metadata.get(
+            'language_detected') if ocr_result.content_metadata else None,
+        'page_count': 1,  # Could be enhanced for multi-page documents
+        'has_tables': ocr_result.content_metadata.get('has_tables') if ocr_result.content_metadata else False,
+        'has_financial_data': ocr_result.content_metadata.get(
+            'has_financial_data') if ocr_result.content_metadata else False,
+        'upload_timestamp': ocr_result.file_metadata.get('upload_timestamp') if ocr_result.file_metadata else None,
+        'extraction_timestamp': ocr_result.processing_metadata.get(
+            'extraction_timestamp') if ocr_result.processing_metadata else None,
+        'text_quality_score': ocr_result.quality_metrics.get('quality_score') if ocr_result.quality_metrics else None,
+        'readability_score': ocr_result.quality_metrics.get(
+            'readability_score') if ocr_result.quality_metrics else None,
+        'complexity_score': ocr_result.quality_metrics.get('complexity') if ocr_result.quality_metrics else None,
+        'detected_entities': ocr_result.detected_entities,
+        'word_count': ocr_result.content_metadata.get('word_count') if ocr_result.content_metadata else None,
+        'character_count': ocr_result.content_metadata.get('character_count') if ocr_result.content_metadata else None,
+        'chunk_ids': [chunk['chunk_id'] for chunk in ocr_result.chunk_metadata] if ocr_result.chunk_metadata else [],
+        'quality_issues': ocr_result.quality_metrics.get('issues') if ocr_result.quality_metrics else []
+    }
+
+
+def export_for_graph_db(ocr_result: OCRResult) -> Tuple[List[Dict], Dict]:
+    """Export OCR result as triples and metadata for graph database"""
+    if not ocr_result.success:
+        return [], {}
+
+    # Generate triples from entities and document relationships
+    triples = []
+    if ocr_result.detected_entities and ocr_result.chunk_metadata:
+        document_name = ocr_result.file_metadata.get('original_filename',
+                                                     'unknown') if ocr_result.file_metadata else 'unknown'
+
+        for chunk in ocr_result.chunk_metadata:
+            chunk_id = chunk['chunk_id']
+            chunk_text = chunk['chunk_text']
+
+            # Create entity-document relationships
+            for entity_type, entities in ocr_result.detected_entities.items():
+                for entity in entities:
+                    if entity.lower() in chunk_text.lower():
+                        triples.append({
+                            'subject': entity,
+                            'predicate': 'appears_in',
+                            'object': document_name,
+                            'subject_type': entity_type,
+                            'object_type': 'document',
+                            'chunk_id': chunk_id,
+                            'chunk_text': chunk_text,
+                            'confidence': ocr_result.confidence,
+                            'inferred': False
+                        })
+
+                        # Create entity-chunk relationships
+                        triples.append({
+                            'subject': entity,
+                            'predicate': 'mentioned_in_chunk',
+                            'object': chunk_id,
+                            'subject_type': entity_type,
+                            'object_type': 'chunk',
+                            'chunk_id': chunk_id,
+                            'chunk_text': chunk_text,
+                            'confidence': ocr_result.confidence,
+                            'inferred': False
+                        })
+
+            # Create document-chunk relationships
+            triples.append({
+                'subject': document_name,
+                'predicate': 'contains_chunk',
+                'object': chunk_id,
+                'subject_type': 'document',
+                'object_type': 'chunk',
+                'chunk_id': chunk_id,
+                'chunk_text': chunk_text,
+                'confidence': 1.0,
+                'inferred': False
+            })
+
+    # Create document metadata for graph storage
+    document_metadata = export_for_vector_db(ocr_result)
+
+    return triples, document_metadata
+
+
+def export_chunks_for_processing(ocr_result: OCRResult) -> List[Dict[str, Any]]:
+    """Export chunks with metadata for further processing"""
+    if not ocr_result.success or not ocr_result.chunk_metadata:
+        return []
+
+    chunks = []
+    for chunk in ocr_result.chunk_metadata:
+        chunk_data = {
+            'chunk_id': chunk['chunk_id'],
+            'chunk_text': chunk['chunk_text'],
+            'word_count': chunk['word_count'],
+            'character_count': chunk['character_count'],
+            'start_word': chunk['start_word'],
+            'end_word': chunk['end_word'],
+            'source_file_id': ocr_result.file_metadata.get('file_id') if ocr_result.file_metadata else None,
+            'source_filename': ocr_result.file_metadata.get('original_filename') if ocr_result.file_metadata else None,
+            'extraction_method': ocr_result.method_used,
+            'extraction_confidence': ocr_result.confidence,
+            'document_type': ocr_result.document_classification.get(
+                'document_type') if ocr_result.document_classification else None
+        }
+        chunks.append(chunk_data)
+
+    return chunks
+
+
+# FACTORY FUNCTIONS - Enhanced Configuration
 
 def create_enhanced_config() -> Dict[str, Any]:
-    """Create optimized configuration for LLM OCR"""
+    """Create optimized configuration for Enhanced LLM OCR with metadata"""
     return {
         # LLM OCR Configuration
         'LLM_OCR_PRIMARY_METHOD': 'gemini',  # Default to Gemini 1.5 Flash
@@ -976,6 +1406,12 @@ def create_enhanced_config() -> Dict[str, Any]:
         'LLM_OCR_TIMEOUT': 60,
         'LLM_OCR_MAX_RETRIES': 2,
         'LLM_OCR_CONFIDENCE_THRESHOLD': 0.7,
+
+        # Enhanced Metadata Configuration
+        'EXTRACT_ENTITIES': True,
+        'CLASSIFY_DOCUMENTS': True,
+        'ANALYZE_QUALITY': True,
+        'CHUNK_SIZE': 1000,  # Words per chunk
 
         # Legacy compatibility (not used but maintained for compatibility)
         'EASYOCR_ENABLED': False,  # Disabled - using LLM OCR
@@ -1007,7 +1443,7 @@ def create_enhanced_config() -> Dict[str, Any]:
 
 def create_ocr_pipeline(config: Dict[str, Any] = None) -> EnhancedOCRPipeline:
     """
-    Factory function for creating LLM OCR pipeline
+    Factory function for creating Enhanced LLM OCR pipeline with metadata
     Maintains backward compatibility with original function
     """
     if config is None:
@@ -1016,7 +1452,7 @@ def create_ocr_pipeline(config: Dict[str, Any] = None) -> EnhancedOCRPipeline:
     return EnhancedOCRPipeline(config)
 
 
-# ADDITIONAL UTILITY FUNCTIONS
+# UTILITY FUNCTIONS
 
 def get_supported_file_types() -> List[str]:
     """Get list of supported file types"""
@@ -1062,231 +1498,67 @@ def validate_api_keys(config: Dict[str, Any]) -> Dict[str, bool]:
     return validation_results
 
 
-def get_recommended_provider_order() -> List[str]:
-    """Get recommended provider order based on performance testing"""
-    return [
-        'gemini',  # Fastest and most cost-effective
-        'openai',  # High accuracy
-        'claude',  # Good for complex documents
-        'mistral'  # Solid fallback option
-    ]
+def get_metadata_summary(ocr_result: OCRResult) -> Dict[str, Any]:
+    """Get comprehensive metadata summary from OCR result"""
+    if not ocr_result.success:
+        return {"status": "failed", "error": ocr_result.error_message}
 
-
-def estimate_processing_cost(file_size_mb: float, method: str = 'gemini') -> float:
-    """Estimate processing cost in USD"""
-    # Rough cost estimates based on current API pricing
-    cost_per_mb = {
-        'gemini': 0.001,  # Very cost-effective
-        'openai': 0.01,  # Higher cost but good quality
-        'claude': 0.008,  # Mid-range cost
-        'mistral': 0.005  # Reasonable cost
-    }
-
-    return file_size_mb * cost_per_mb.get(method, 0.005)
-
-
-def get_performance_comparison() -> Dict[str, Dict[str, Any]]:
-    """Get performance comparison between LLM OCR and traditional OCR"""
-    return {
-        'traditional_ocr': {
-            'average_processing_time': 165,  # seconds
-            'accuracy_rate': 0.75,
-            'setup_complexity': 'High',
-            'dependencies': ['easyocr', 'opencv-python', 'pdf2image'],
-            'file_size_limit': '50MB',
-            'supported_languages': 80,
-            'cost_per_document': 0.0,
-            'quality_consistency': 'Variable'
+    summary = {
+        "status": "success",
+        "extraction_info": {
+            "method": ocr_result.method_used,
+            "confidence": ocr_result.confidence,
+            "processing_time": ocr_result.processing_time,
+            "text_length": len(ocr_result.text)
         },
-        'llm_ocr': {
-            'average_processing_time': 19,  # seconds
-            'accuracy_rate': 0.99,
-            'setup_complexity': 'Low',
-            'dependencies': ['google-generativeai', 'openai', 'anthropic'],
-            'file_size_limit': '100MB',
-            'supported_languages': 100,
-            'cost_per_document': 0.005,
-            'quality_consistency': 'Excellent'
-        },
-        'improvement_factors': {
-            'speed_improvement': 8.5,
-            'accuracy_improvement': 1.32,
-            'setup_time_reduction': 0.1,
-            'dependency_reduction': 0.5
-        }
+        "file_info": ocr_result.file_metadata if ocr_result.file_metadata else {},
+        "content_info": ocr_result.content_metadata if ocr_result.content_metadata else {},
+        "quality_info": ocr_result.quality_metrics if ocr_result.quality_metrics else {},
+        "classification": ocr_result.document_classification if ocr_result.document_classification else {},
+        "entities": ocr_result.detected_entities if ocr_result.detected_entities else {},
+        "chunks_created": len(ocr_result.chunk_metadata) if ocr_result.chunk_metadata else 0
     }
 
-
-# MIGRATION HELPER FUNCTIONS
-
-def migrate_from_traditional_ocr(old_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Migrate configuration from traditional OCR to LLM OCR"""
-    new_config = create_enhanced_config()
-
-    # Map old settings to new settings
-    if old_config.get('OCR_PRIMARY_METHOD') == 'mistral':
-        new_config['LLM_OCR_PRIMARY_METHOD'] = 'mistral'
-    elif old_config.get('OCR_PRIMARY_METHOD') == 'easyocr':
-        new_config['LLM_OCR_PRIMARY_METHOD'] = 'gemini'  # Best alternative
-
-    # Preserve API keys
-    if old_config.get('MISTRAL_API_KEY'):
-        new_config['MISTRAL_API_KEY'] = old_config['MISTRAL_API_KEY']
-
-    # Preserve other relevant settings
-    new_config['LLM_OCR_FALLBACK_ENABLED'] = old_config.get('OCR_FALLBACK_ENABLED', True)
-    new_config['LLM_OCR_TIMEOUT'] = old_config.get('OCR_DEFAULT_TIMEOUT', 60)
-
-    return new_config
-
-
-def check_migration_compatibility(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Check if current configuration is compatible with LLM OCR migration"""
-    compatibility_report = {
-        'can_migrate': True,
-        'warnings': [],
-        'required_changes': [],
-        'available_providers': []
-    }
-
-    # Check API key availability
-    api_key_status = validate_api_keys(config)
-    available_providers = [k for k, v in api_key_status.items() if v]
-
-    compatibility_report['available_providers'] = available_providers
-
-    if not available_providers:
-        compatibility_report['can_migrate'] = False
-        compatibility_report['required_changes'].append(
-            'At least one LLM provider API key is required (Gemini, OpenAI, Claude, or Mistral)'
-        )
-
-    # Check for potential issues
-    if config.get('EASYOCR_ENABLED') and not available_providers:
-        compatibility_report['warnings'].append(
-            'EasyOCR is currently enabled but no LLM providers are available'
-        )
-
-    return compatibility_report
-
-
-# TESTING AND VALIDATION FUNCTIONS
-
-def test_pipeline_performance(pipeline: EnhancedOCRPipeline,
-                              test_files: List[Any]) -> Dict[str, Any]:
-    """Test pipeline performance with sample files"""
-    results = {
-        'total_files': len(test_files),
-        'successful_extractions': 0,
-        'failed_extractions': 0,
-        'total_processing_time': 0.0,
-        'average_confidence': 0.0,
-        'file_results': []
-    }
-
-    total_confidence = 0.0
-
-    for test_file in test_files:
-        try:
-            start_time = time.time()
-            result = pipeline.extract_text(test_file, save_to_disk=False)
-            processing_time = time.time() - start_time
-
-            file_result = {
-                'filename': test_file.name,
-                'success': result.success,
-                'processing_time': processing_time,
-                'confidence': result.confidence,
-                'text_length': len(result.text) if result.success else 0,
-                'method_used': result.method_used
-            }
-
-            results['file_results'].append(file_result)
-            results['total_processing_time'] += processing_time
-
-            if result.success:
-                results['successful_extractions'] += 1
-                total_confidence += result.confidence
-            else:
-                results['failed_extractions'] += 1
-
-        except Exception as e:
-            results['failed_extractions'] += 1
-            results['file_results'].append({
-                'filename': test_file.name,
-                'success': False,
-                'processing_time': 0.0,
-                'confidence': 0.0,
-                'text_length': 0,
-                'method_used': 'error',
-                'error': str(e)
-            })
-
-    # Calculate averages
-    if results['successful_extractions'] > 0:
-        results['average_confidence'] = total_confidence / results['successful_extractions']
-
-    results['success_rate'] = results['successful_extractions'] / results['total_files']
-    results['average_processing_time'] = results['total_processing_time'] / results['total_files']
-
-    return results
-
-
-# LOGGING AND MONITORING
-
-def setup_llm_ocr_logging(log_level: str = 'INFO'):
-    """Setup optimized logging for LLM OCR"""
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format='%(asctime)s | %(levelname)s | LLM-OCR | %(name)s:%(lineno)d | %(message)s'
-    )
-
-    # Reduce noise from external libraries
-    logging.getLogger('google.generativeai').setLevel(logging.WARNING)
-    logging.getLogger('openai').setLevel(logging.WARNING)
-    logging.getLogger('anthropic').setLevel(logging.WARNING)
-    logging.getLogger('mistralai').setLevel(logging.WARNING)
-    logging.getLogger('PIL').setLevel(logging.WARNING)
-
-    logger.info("LLM OCR logging configured")
+    return summary
 
 
 # MAIN EXECUTION AND TESTING
 
 if __name__ == "__main__":
     # Example usage and testing
-    print("LLM OCR Pipeline - Enhanced Version")
-    print("=" * 50)
+    print("Enhanced LLM OCR Pipeline with Metadata - Complete Version")
+    print("=" * 60)
 
     # Create test configuration
     test_config = create_enhanced_config()
 
-    # Add test API keys (you would set these in your actual config)
-    # test_config['GOOGLE_API_KEY'] = 'your-gemini-api-key'
-    # test_config['OPENAI_API_KEY'] = 'your-openai-api-key'
+    # Show configuration
+    print("Configuration:")
+    for key, value in test_config.items():
+        if 'API_KEY' not in key:
+            print(f"  {key}: {value}")
 
     # Test API key validation
     api_status = validate_api_keys(test_config)
-    print(f"API Key Status: {api_status}")
+    print(f"\nAPI Key Status: {api_status}")
 
     # Test pipeline creation
     try:
         pipeline = create_ocr_pipeline(test_config)
         status = pipeline.get_status_info()
-        print(f"Pipeline Status: {status}")
+        print(f"\nPipeline Status:")
+        for key, value in status.items():
+            print(f"  {key}: {value}")
 
         # Test provider availability
         providers = pipeline.get_available_providers()
-        print(f"Available Providers: {providers}")
+        print(f"\nAvailable Providers: {providers}")
 
     except Exception as e:
         print(f"Pipeline creation failed: {e}")
 
-    # Show performance comparison
-    comparison = get_performance_comparison()
-    print("\nPerformance Comparison:")
-    print(f"Traditional OCR: {comparison['traditional_ocr']['average_processing_time']}s")
-    print(f"LLM OCR: {comparison['llm_ocr']['average_processing_time']}s")
-    print(f"Speed Improvement: {comparison['improvement_factors']['speed_improvement']}x")
+    print(f"\nSupported File Types: {get_supported_file_types()}")
 
-    print("\nLLM OCR Pipeline ready for integration!")
+    print("\nEnhanced LLM OCR Pipeline with Metadata ready for integration!")
+    print("Features: Entity Extraction | Document Classification | Quality Analysis | Chunking")
+    print("Ready for Vector DB and Graph DB integration with rich metadata!")

@@ -1,10 +1,20 @@
-# GraphRAG_Document_AI_Platform.py (Main App Entry Point - FIXED VERSION)
+# GraphRAG_Document_AI_Platform.py (Main App Entry Point - LLM OCR Only VERSION)
 
 import nest_asyncio
 
 nest_asyncio.apply()
 
+# FIXED: Move st.set_page_config to be the VERY FIRST Streamlit command
 import streamlit as st
+
+st.set_page_config(
+    page_title="Document AI Assistant",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Now import everything else
 import os
 import logging
 import sys
@@ -14,13 +24,6 @@ import configparser
 import requests
 import re
 from typing import Dict, Optional, Any
-
-st.set_page_config(
-    page_title="Document AI Assistant",  # Updated page title
-    page_icon="🤖",  # Updated icon to be more AI-focused
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 from enhanced_ocr_pipeline import EnhancedOCRPipeline
 
@@ -65,7 +68,7 @@ def get_masked_config_for_logging(config: Dict[str, Any]) -> Dict[str, Any]:
     sensitive_keys = {
         'api_key', 'password', 'secret', 'token', 'key',
         'LLM_API_KEY', 'TRIPLE_EXTRACTION_API_KEY', 'MISTRAL_API_KEY',
-        'NEO4J_PASSWORD', 'mistral_api_key'
+        'NEO4J_PASSWORD', 'mistral_api_key', 'gemini_api_key', 'openai_api_key', 'anthropic_api_key'
     }
 
     def mask_recursive(obj):
@@ -144,12 +147,12 @@ logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def get_enhanced_ocr_pipeline(config):
-    """Initialize the enhanced OCR pipeline with EasyOCR + Mistral"""
-    logger.info("Initializing Enhanced OCR Pipeline...")
+    """Initialize the enhanced LLM OCR pipeline (No EasyOCR)"""
+    logger.info("Initializing Enhanced LLM OCR Pipeline...")
     try:
         pipeline = EnhancedOCRPipeline(config)
 
-        # FIXED: Get Mistral API key from the centralized TOML structure
+        # Get LLM API keys from the centralized TOML structure
         mistral_api_key = (
                 config.get('MISTRAL_API_KEY') or
                 config.get('mistral_api_key') or
@@ -157,24 +160,50 @@ def get_enhanced_ocr_pipeline(config):
                 config.get('llm', {}).get('ocr', {}).get('mistral_api_key')
         )
 
-        mistral_client = get_mistral_client(mistral_api_key)
-        if mistral_client:
-            pipeline.set_mistral_client(mistral_client)
+        gemini_api_key = (
+                config.get('GEMINI_API_KEY') or
+                config.get('LLM_API_KEY') or
+                config.get('llm', {}).get('api_key') or
+                config.get('llm', {}).get('ocr', {}).get('gemini_api_key')
+        )
 
-        # FIXED: Use masked logging
-        easyocr_status = '✓' if pipeline.easyocr_reader else '✗'
+        openai_api_key = (
+                config.get('OPENAI_API_KEY') or
+                config.get('llm', {}).get('ocr', {}).get('openai_api_key')
+        )
+
+        anthropic_api_key = (
+                config.get('ANTHROPIC_API_KEY') or
+                config.get('llm', {}).get('ocr', {}).get('anthropic_api_key')
+        )
+
+        # Initialize available LLM clients
+        if mistral_api_key:
+            mistral_client = get_mistral_client(mistral_api_key)
+            if mistral_client:
+                pipeline.set_mistral_client(mistral_client)
+
+        # Add other LLM clients as needed (Gemini, OpenAI, Anthropic)
+        # Note: You'll need to implement these methods in your EnhancedOCRPipeline class
+
+        # Log available methods (no EasyOCR)
         mistral_status = '✓' if pipeline.mistral_client else '✗'
-        logger.info(f"Enhanced OCR Pipeline initialized: EasyOCR={easyocr_status}, Mistral={mistral_status}")
+        available_methods = []
+        if pipeline.mistral_client:
+            available_methods.append("Mistral")
+
+        logger.info(
+            f"Enhanced LLM OCR Pipeline initialized: Available methods: {', '.join(available_methods) if available_methods else 'None'}")
         return pipeline
     except Exception as e:
-        logger.error(f"Failed to initialize Enhanced OCR Pipeline: {e}")
+        logger.error(f"Failed to initialize Enhanced LLM OCR Pipeline: {e}")
         return None
 
 
 @st.cache_data
 def load_config():
     """
-    FIXED: Loads configuration with API key masking and centralized settings.
+    FIXED: Loads configuration with API key masking and centralized settings (No EasyOCR).
     """
     config = {}
     logger.info("Loading configuration...")
@@ -202,8 +231,11 @@ def load_config():
             config['TRIPLE_EXTRACTION_MAX_TOKENS'] = triple_config.get("max_tokens", 2000)
             config['TRIPLE_EXTRACTION_TEMPERATURE'] = triple_config.get("temperature", 0.1)
 
-            # FIXED: Get Mistral API key from centralized location
+            # LLM OCR API keys from centralized location
             config['MISTRAL_API_KEY'] = llm_config.get("ocr", {}).get("mistral_api_key")
+            config['GEMINI_API_KEY'] = llm_config.get("ocr", {}).get("gemini_api_key")
+            config['OPENAI_API_KEY'] = llm_config.get("ocr", {}).get("openai_api_key")
+            config['ANTHROPIC_API_KEY'] = llm_config.get("ocr", {}).get("anthropic_api_key")
 
             # CENTRALIZED: Database configuration
             neo4j_config = config_toml.get("neo4j", {})
@@ -231,14 +263,11 @@ def load_config():
             config['INFERENCE_ENABLED'] = config_toml.get("inference", {}).get("enabled", True)
             config['CACHE_ENABLED'] = config_toml.get("caching", {}).get("enabled", True)
 
-            # CENTRALIZED: OCR configuration
+            # CENTRALIZED: LLM OCR configuration (No EasyOCR)
             ocr_config = config_toml.get("ocr", {})
-            config['EASYOCR_ENABLED'] = ocr_config.get("easyocr_enabled", True)
-            config['EASYOCR_GPU'] = ocr_config.get("easyocr_gpu", True)
-            config['EASYOCR_LANGUAGES'] = ocr_config.get("easyocr_languages", ["en"])
-            config['OCR_PRIMARY_METHOD'] = ocr_config.get("ocr_primary_method", "easyocr")
-            config['OCR_FALLBACK_ENABLED'] = ocr_config.get("ocr_fallback_enabled", True)
-            config['OCR_CONFIDENCE_THRESHOLD'] = ocr_config.get("confidence_threshold", 0.5)
+            config['OCR_PRIMARY_METHOD'] = ocr_config.get("primary_method", "gemini")
+            config['OCR_FALLBACK_ENABLED'] = ocr_config.get("fallback_enabled", True)
+            config['OCR_CONFIDENCE_THRESHOLD'] = ocr_config.get("confidence_threshold", 0.7)
 
             # CENTRALIZED: NLP configuration
             nlp_config = config_toml.get("nlp", {})
@@ -276,9 +305,9 @@ def load_config():
         config['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD', config.get('NEO4J_PASSWORD'))
         config['LLM_API_KEY'] = os.getenv('LLM_API_KEY', os.getenv('GOOGLE_API_KEY', config.get('LLM_API_KEY')))
         config['MISTRAL_API_KEY'] = os.getenv('MISTRAL_API_KEY', config.get('MISTRAL_API_KEY'))
-        config['EASYOCR_ENABLED'] = os.getenv('EASYOCR_ENABLED',
-                                              str(config.get('EASYOCR_ENABLED', True))).lower() == 'true'
-        config['EASYOCR_GPU'] = os.getenv('EASYOCR_GPU', str(config.get('EASYOCR_GPU', True))).lower() == 'true'
+        config['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', config.get('GEMINI_API_KEY'))
+        config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY', config.get('OPENAI_API_KEY'))
+        config['ANTHROPIC_API_KEY'] = os.getenv('ANTHROPIC_API_KEY', config.get('ANTHROPIC_API_KEY'))
 
         # 4. Final Validation
         required_for_qa = ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD', 'LLM_MODEL', 'LLM_API_KEY', 'EMBEDDING_MODEL',
@@ -353,7 +382,7 @@ def get_correction_llm(config):
 def get_mistral_client(api_key):
     """Initializes and returns a Mistral client."""
     if not api_key:
-        logger.warning("Mistral API Key not provided. OCR will be disabled")
+        logger.warning("Mistral API Key not provided. Mistral OCR will be disabled")
         return None
 
     # FIXED: Mask API key in logs
@@ -557,10 +586,12 @@ def main():
     st.markdown("""
     **Welcome to your AI-powered Document Assistant!**
 
-    * Use **Document Ingestion** to upload documents (PDF, TXT, images via OCR). The AI will extract information, build a knowledge graph, and create vector embeddings.
+    * Use **Document Ingestion** to upload documents (PDF, TXT, images via LLM OCR). The AI will extract information, build a knowledge graph, and create vector embeddings.
     * Use **Knowledge Chat Assistant** to ask questions about the information contained within your processed documents.
     * Use **Data Extraction Validation** to monitor AI extraction quality and performance metrics.
     * Use **Processed Files Manager** to browse and manage your document archive.
+
+    **LLM OCR Methods**: Supports Gemini 1.5 Flash, Mistral Pixtral, GPT-4o Vision, and Claude 3.5 Sonnet for document text extraction.
 
     **Security Note**: All API keys and passwords are automatically masked in application logs for security.
     """)
