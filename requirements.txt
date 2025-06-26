@@ -1,86 +1,77 @@
-# LLM Providers (Core OCR Engine)
-google-generativeai>=0.8.0    # Gemini 1.5 Flash/Pro - Primary OCR & Text Processing
-openai>=1.35.0                # GPT-4o/4o-mini Vision - High Quality OCR
-anthropic>=0.28.0             # Claude 3.5 Sonnet/Haiku - Alternative OCR
-mistralai>=1.0.0              # Pixtral & Le Chat - Specialized OCR
+# ================================================================
+# CLEAN REQUIREMENTS.txt - NO MORE PYMUPDF CONFUSION
+# ================================================================
 
-# Document Processing (LLM OCR Pipeline)
-pillow>=10.3.0                # Image processing and manipulation
-PyMuPDF>=1.24.0               # PDF to image conversion (fitz)
-pymupdf>=1.24.0               # Alternative PyMuPDF installation name
-toml>=0.10.0                  # TOML configuration management
-tomli>=2.0.1                  # TOML parser for Python <3.11 compatibility
-fitz
+# Core LLM Providers
+google-generativeai>=0.8.0    # Gemini 1.5 Flash/Pro
+openai>=1.35.0                # GPT-4o/4o-mini Vision
+anthropic>=0.28.0             # Claude 3.5 Sonnet/Haiku
+mistralai>=1.0.0              # Pixtral & Le Chat
 
-# Database & Vector Storage
-neo4j>=5.19.0                 # Knowledge graph database
-chromadb>=0.5.0               # Vector embeddings storage with enhanced features
-sentence-transformers>=3.0.0  # Text embeddings for GraphRAG
-
-# Web Framework & UI
-streamlit>=1.35.0             # Main application interface
-
-# Knowledge Graph & Text Processing
-langchain-text-splitters>=0.2.0  # Advanced text chunking for GraphRAG
-llama-index>=0.10.0           # Knowledge graph construction and querying
-llama-index-llms-gemini>=0.1.0  # Gemini integration for LlamaIndex
-tiktoken>=0.7.0               # Token counting for LLM usage optimization
-spacy>=3.7.0                  # Advanced NLP processing
-
-# Data Processing & Analysis
-numpy>=1.26.0                 # Numerical operations and array processing
-pandas>=2.2.0                 # Data manipulation and analysis
-openpyxl>=3.1.0               # Excel file support for data export
-networkx>=3.3                 # Graph algorithms and network analysis
-
-# Graph Visualization & Export
-pyvis>=0.3.2                  # Interactive network visualization
-matplotlib>=3.8.0             # Static plotting and visualization
-plotly>=5.20.0                # Interactive plotting and dashboards
-
-# Async & Performance
-nest-asyncio>=1.6.0           # Async support for Streamlit apps
-asyncio>=3.4.3                # Enhanced async operations
-
-# Environment & Configuration
-python-dotenv>=1.0.0          # Environment variables management
-configparser>=6.0.0           # INI configuration file support
-
-# HTTP & API Clients
-requests>=2.32.0              # HTTP client for API calls
-httpx>=0.27.0                 # Modern async HTTP client
-
-# Text Processing & Analysis
-beautifulsoup4>=4.12.0        # HTML/XML parsing for document processing
-lxml>=5.2.0                   # XML/HTML parser backend
-textstat>=0.7.3               # Text readability and complexity analysis
-
-# Community Detection & Graph Analysis
-python-louvain>=0.16          # Community detection algorithms
-igraph>=0.11.0                # Advanced graph analysis library
-
-# Template Engine
-jinja2>=3.1.0                 # Template engine for report generation
-
-# Image Processing (For LLM OCR preprocessing)
-opencv-python>=4.9.0         # Computer vision for image preprocessing
-
-# Data Validation & Schema
-pydantic>=2.7.0               # Data validation and settings management
-jsonschema>=4.22.0            # JSON schema validation
-
-# Security & Encryption (for sensitive data handling)
-cryptography>=42.0.0          # Encryption for sensitive configuration data
-
-# Logging & Monitoring
-loguru>=0.7.0                 # Enhanced logging capabilities
-
-# Memory Optimization
-psutil>=5.9.0                 # System and process utilities for monitoring
-
-# File Format Support
+# Document Processing - CLEAN PDF HANDLING
+PyMuPDF>=1.24.0               # PDF processing (provides 'fitz' module)
+pillow>=10.3.0                # Image processing
 python-magic>=0.4.27          # File type detection
 chardet>=5.2.0                # Character encoding detection
 
+# Configuration Management
+toml>=0.10.0                  # TOML config files
+tomli>=2.0.1                  # TOML parser for Python <3.11
+python-dotenv>=1.0.0          # Environment variables
+configparser>=6.0.0           # INI configuration files
 
+# Database & Vector Storage
+neo4j>=5.19.0                 # Knowledge graph database
+chromadb>=0.5.0               # Vector embeddings storage
+sentence-transformers>=3.0.0  # Text embeddings
 
+# Web Framework & UI
+streamlit>=1.35.0             # Main application interface
+plotly>=5.20.0                # Interactive charts for enhanced UI
+pandas>=2.2.0                 # Data manipulation for UI metrics
+
+# Knowledge Graph & NLP
+langchain-text-splitters>=0.2.0  # Text chunking
+llama-index>=0.10.0           # Knowledge graph construction
+llama-index-llms-gemini>=0.1.0  # Gemini integration
+tiktoken>=0.7.0               # Token counting
+spacy>=3.7.0                  # NLP processing
+
+# Enhanced Entity Linking & Fuzzy Matching
+fuzzywuzzy>=0.18.0            # Fuzzy string matching
+python-levenshtein>=0.21.0    # Fast string distance calculations
+
+# Data Processing & Analysis
+numpy>=1.26.0                 # Numerical operations
+openpyxl>=3.1.0               # Excel file support
+networkx>=3.3                 # Graph algorithms
+
+# Graph Visualization
+pyvis>=0.3.2                  # Interactive network visualization
+matplotlib>=3.8.0             # Static plotting
+
+# Async & Performance
+nest-asyncio>=1.6.0           # Async support for Streamlit
+psutil>=5.9.0                 # System monitoring
+
+# HTTP & API Clients
+requests>=2.32.0              # HTTP client
+httpx>=0.27.0                 # Modern async HTTP client
+
+# Text Processing & Analysis
+beautifulsoup4>=4.12.0        # HTML/XML parsing
+lxml>=5.2.0                   # XML/HTML parser
+textstat>=0.7.3               # Text analysis
+
+# Graph Analysis (Optional - for advanced features)
+python-louvain>=0.16          # Community detection
+igraph>=0.11.0                # Advanced graph analysis
+
+# Template & Validation
+jinja2>=3.1.0                 # Template engine
+pydantic>=2.7.0               # Data validation
+jsonschema>=4.22.0            # JSON schema validation
+
+# Security & Logging
+cryptography>=42.0.0          # Encryption
+loguru>=0.7.0                 # Enhanced logging

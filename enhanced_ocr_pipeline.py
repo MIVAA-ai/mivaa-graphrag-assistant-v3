@@ -1,4 +1,4 @@
-# enhanced_ocr_pipeline.py - COMPLETE ENHANCED VERSION WITH METADATA
+# enhanced_ocr_pipeline.py - COMPLETE LLM OCR ONLY VERSION WITH METADATA
 
 import logging
 import tempfile
@@ -23,18 +23,30 @@ from contextlib import contextmanager
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 # PDF processing
 try:
     import fitz  # PyMuPDF
-
     PDF_PROCESSING_AVAILABLE = True
-except ImportError:
+    logger.info("PyMuPDF (fitz) imported successfully")
+except ImportError as e:
     PDF_PROCESSING_AVAILABLE = False
+    logger.warning(f"PyMuPDF (fitz) not available: {e}")
+
+# Alternative import attempt
+if not PDF_PROCESSING_AVAILABLE:
+    try:
+        import PyMuPDF as fitz
+        PDF_PROCESSING_AVAILABLE = True
+        logger.info("PyMuPDF imported successfully as alternative")
+    except ImportError:
+        logger.error("Neither 'fitz' nor 'PyMuPDF' could be imported")
 
 # Image processing
 try:
     from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -42,7 +54,6 @@ except ImportError:
 # Entity extraction
 try:
     import spacy
-
     SPACY_AVAILABLE = True
     # Load English model for entity detection
     try:
@@ -57,28 +68,24 @@ except ImportError:
 # LLM Clients
 try:
     from mistralai import Mistral
-
     MISTRAL_AVAILABLE = True
 except ImportError:
     MISTRAL_AVAILABLE = False
 
 try:
     import google.generativeai as genai
-
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
 
 try:
     import openai
-
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
 
 try:
     import anthropic
-
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -86,15 +93,12 @@ except ImportError:
 # OCR storage with proper singleton handling
 try:
     from src.utils.ocr_storage import create_storage_manager, get_storage_manager
-
     OCR_STORAGE_AVAILABLE = True
 except ImportError:
     OCR_STORAGE_AVAILABLE = False
 
-
     def create_storage_manager(*args, **kwargs):
         return None
-
 
     def get_storage_manager():
         return None
@@ -115,7 +119,7 @@ class OCRMethod(Enum):
 @dataclass
 class OCRResult:
     """Enhanced OCR result structure with comprehensive metadata"""
-    # Core OCR results (existing)
+    # Core OCR results
     success: bool
     text: str
     confidence: float
@@ -166,7 +170,7 @@ class TimeoutHandler:
 class LLMOCRExtractor:
     """
     Enhanced LLM-based OCR extractor with comprehensive metadata extraction
-    Replaces traditional OCR with superior accuracy and rich metadata
+    Superior accuracy and rich metadata compared to traditional OCR
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -211,8 +215,10 @@ class LLMOCRExtractor:
         gemini_api_key = (
                 self.config.get('GOOGLE_API_KEY') or
                 self.config.get('LLM_API_KEY') or
+                self.config.get('GEMINI_API_KEY') or
                 self.config.get('gemini_api_key') or
-                self.config.get('llm', {}).get('api_key')
+                self.config.get('llm', {}).get('api_key') or
+                self.config.get('llm', {}).get('ocr', {}).get('gemini_api_key')
         )
 
         if gemini_api_key and GEMINI_AVAILABLE:
@@ -227,7 +233,8 @@ class LLMOCRExtractor:
         # OpenAI client
         openai_api_key = (
                 self.config.get('OPENAI_API_KEY') or
-                self.config.get('openai_api_key')
+                self.config.get('openai_api_key') or
+                self.config.get('llm', {}).get('ocr', {}).get('openai_api_key')
         )
 
         if openai_api_key and OPENAI_AVAILABLE:
@@ -241,7 +248,8 @@ class LLMOCRExtractor:
         # Claude client
         claude_api_key = (
                 self.config.get('ANTHROPIC_API_KEY') or
-                self.config.get('claude_api_key')
+                self.config.get('claude_api_key') or
+                self.config.get('llm', {}).get('ocr', {}).get('anthropic_api_key')
         )
 
         if claude_api_key and ANTHROPIC_AVAILABLE:
@@ -1156,11 +1164,6 @@ This is for business document processing - perfect accuracy required."""
         return self.extract_text(uploaded_file, save_to_disk)
 
     @property
-    def easyocr_reader(self):
-        """Compatibility property - returns None since we don't use EasyOCR"""
-        return None
-
-    @property
     def confidence_threshold(self):
         """Return confidence threshold"""
         return self.config.get('LLM_OCR_CONFIDENCE_THRESHOLD', 0.7)
@@ -1184,16 +1187,16 @@ class EnhancedOCRPipeline:
         # Initialize the LLM OCR extractor
         self.llm_extractor = LLMOCRExtractor(config)
 
-        # Compatibility properties
+        # Compatibility properties - NO EASYOCR
         self._easyocr_reader = None  # Always None - we don't use EasyOCR
         self._mistral_client = None
         self.primary_method = config.get('LLM_OCR_PRIMARY_METHOD', 'gemini')
         self.fallback_enabled = config.get('LLM_OCR_FALLBACK_ENABLED', True)
         self.confidence_threshold = config.get('LLM_OCR_CONFIDENCE_THRESHOLD', 0.7)
 
-        # Language settings (for compatibility)
-        self.easyocr_languages = config.get('EASYOCR_LANGUAGES', ['en'])
-        self.easyocr_gpu = config.get('EASYOCR_GPU', True)
+        # Language settings (for compatibility only)
+        self.easyocr_languages = ['en']  # Static for compatibility
+        self.easyocr_gpu = False  # Static for compatibility
 
         # Storage manager
         self.ocr_storage = self.llm_extractor._storage_manager
@@ -1209,7 +1212,7 @@ class EnhancedOCRPipeline:
 
     @property
     def easyocr_reader(self):
-        """Compatibility property - returns None since we use LLM OCR"""
+        """Compatibility property - returns None since we use LLM OCR only"""
         return None
 
     @property
@@ -1253,6 +1256,7 @@ class EnhancedOCRPipeline:
             'confidence_threshold': self.confidence_threshold,
             'storage_available': self.ocr_storage is not None,
             'backend_type': 'LLM_OCR_ENHANCED',
+            'easyocr_available': False,  # Always False
             'metadata_features': {
                 'entity_extraction': self.llm_extractor.extract_entities,
                 'document_classification': self.llm_extractor.classify_documents,
@@ -1395,7 +1399,7 @@ def export_chunks_for_processing(ocr_result: OCRResult) -> List[Dict[str, Any]]:
     return chunks
 
 
-# FACTORY FUNCTIONS - Enhanced Configuration
+# FACTORY FUNCTIONS - Enhanced Configuration for LLM OCR Only
 
 def create_enhanced_config() -> Dict[str, Any]:
     """Create optimized configuration for Enhanced LLM OCR with metadata"""
@@ -1412,14 +1416,6 @@ def create_enhanced_config() -> Dict[str, Any]:
         'CLASSIFY_DOCUMENTS': True,
         'ANALYZE_QUALITY': True,
         'CHUNK_SIZE': 1000,  # Words per chunk
-
-        # Legacy compatibility (not used but maintained for compatibility)
-        'EASYOCR_ENABLED': False,  # Disabled - using LLM OCR
-        'EASYOCR_GPU': True,
-        'EASYOCR_LANGUAGES': ['en'],
-        'OCR_PRIMARY_METHOD': 'gemini',  # Maps to LLM_OCR_PRIMARY_METHOD
-        'OCR_FALLBACK_ENABLED': True,
-        'OCR_CONFIDENCE_THRESHOLD': 0.7,
 
         # Performance settings
         'ENABLE_OCR_TIMEOUT': True,
@@ -1476,6 +1472,7 @@ def validate_api_keys(config: Dict[str, Any]) -> Dict[str, bool]:
     gemini_key = (
             config.get('GOOGLE_API_KEY') or
             config.get('LLM_API_KEY') or
+            config.get('GEMINI_API_KEY') or
             config.get('gemini_api_key')
     )
     validation_results['gemini'] = bool(gemini_key and GEMINI_AVAILABLE)
@@ -1526,7 +1523,7 @@ def get_metadata_summary(ocr_result: OCRResult) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     # Example usage and testing
-    print("Enhanced LLM OCR Pipeline with Metadata - Complete Version")
+    print("Enhanced LLM OCR Pipeline with Metadata - LLM OCR Only Version")
     print("=" * 60)
 
     # Create test configuration
@@ -1561,4 +1558,5 @@ if __name__ == "__main__":
 
     print("\nEnhanced LLM OCR Pipeline with Metadata ready for integration!")
     print("Features: Entity Extraction | Document Classification | Quality Analysis | Chunking")
+    print("LLM Providers: Gemini | OpenAI | Claude | Mistral")
     print("Ready for Vector DB and Graph DB integration with rich metadata!")

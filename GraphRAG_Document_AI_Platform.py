@@ -147,54 +147,62 @@ logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def get_enhanced_ocr_pipeline(config):
-    """Initialize the enhanced LLM OCR pipeline (No EasyOCR)"""
+    """Initialize the enhanced LLM OCR pipeline with FIXED configuration mapping"""
     logger.info("Initializing Enhanced LLM OCR Pipeline...")
     try:
-        pipeline = EnhancedOCRPipeline(config)
+        # FIXED: Proper config mapping for OCR settings
+        ocr_config = {
+            # Map TOML structure to expected format
+            'LLM_OCR_PRIMARY_METHOD': config.get('llm', {}).get('ocr', {}).get('primary_method', 'gemini'),
+            'LLM_OCR_FALLBACK_ENABLED': config.get('llm', {}).get('ocr', {}).get('fallback_enabled', True),
+            'LLM_OCR_CONFIDENCE_THRESHOLD': config.get('llm', {}).get('ocr', {}).get('confidence_threshold', 0.7),
+            'LLM_OCR_TIMEOUT': config.get('llm', {}).get('ocr', {}).get('timeout_seconds', 60),
+            'LLM_OCR_MAX_RETRIES': config.get('llm', {}).get('ocr', {}).get('max_retries', 2),
 
-        # Get LLM API keys from the centralized TOML structure
-        mistral_api_key = (
-                config.get('MISTRAL_API_KEY') or
-                config.get('mistral_api_key') or
-                config.get('mistral', {}).get('api_key') or
-                config.get('llm', {}).get('ocr', {}).get('mistral_api_key')
-        )
+            # Enhanced metadata settings
+            'EXTRACT_ENTITIES': config.get('metadata', {}).get('extract_entities', True),
+            'CLASSIFY_DOCUMENTS': config.get('metadata', {}).get('classify_documents', True),
+            'ANALYZE_QUALITY': config.get('metadata', {}).get('analyze_quality', True),
+            'CHUNK_SIZE': config.get('metadata', {}).get('chunk_size', 1000),
 
-        gemini_api_key = (
-                config.get('GEMINI_API_KEY') or
-                config.get('LLM_API_KEY') or
-                config.get('llm', {}).get('api_key') or
-                config.get('llm', {}).get('ocr', {}).get('gemini_api_key')
-        )
+            # API Keys - use centralized TOML structure
+            'mistral_api_key': config.get('llm', {}).get('ocr', {}).get('mistral_api_key'),
+            'gemini_api_key': config.get('llm', {}).get('ocr', {}).get('gemini_api_key') or config.get('llm', {}).get(
+                'api_key'),
+            'openai_api_key': config.get('llm', {}).get('ocr', {}).get('openai_api_key'),
+            'anthropic_api_key': config.get('llm', {}).get('ocr', {}).get('anthropic_api_key'),
 
-        openai_api_key = (
-                config.get('OPENAI_API_KEY') or
-                config.get('llm', {}).get('ocr', {}).get('openai_api_key')
-        )
+            # Pass full config sections
+            'llm': config.get('llm', {}),
+            'metadata': config.get('metadata', {}),
+            'file_processing': config.get('file_processing', {}),
+            'storage': config.get('storage', {})
+        }
 
-        anthropic_api_key = (
-                config.get('ANTHROPIC_API_KEY') or
-                config.get('llm', {}).get('ocr', {}).get('anthropic_api_key')
-        )
+        pipeline = EnhancedOCRPipeline(ocr_config)
 
-        # Initialize available LLM clients
+        # Initialize LLM clients with centralized keys
+        mistral_api_key = ocr_config.get('mistral_api_key')
         if mistral_api_key:
             mistral_client = get_mistral_client(mistral_api_key)
             if mistral_client:
                 pipeline.set_mistral_client(mistral_client)
+                logger.info("✓ Mistral client initialized for OCR")
 
-        # Add other LLM clients as needed (Gemini, OpenAI, Anthropic)
-        # Note: You'll need to implement these methods in your EnhancedOCRPipeline class
+        # Log primary method configuration
+        primary_method = ocr_config.get('LLM_OCR_PRIMARY_METHOD', 'unknown')
+        available_methods = pipeline.get_available_providers()
 
-        # Log available methods (no EasyOCR)
-        mistral_status = '✓' if pipeline.mistral_client else '✗'
-        available_methods = []
-        if pipeline.mistral_client:
-            available_methods.append("Mistral")
+        logger.info(f"🎯 Enhanced OCR Pipeline: Primary={primary_method}, Available={available_methods}")
 
-        logger.info(
-            f"Enhanced LLM OCR Pipeline initialized: Available methods: {', '.join(available_methods) if available_methods else 'None'}")
+        # Verify primary method is available
+        if primary_method not in available_methods:
+            logger.warning(f"⚠️ Primary method '{primary_method}' not available. Available: {available_methods}")
+        else:
+            logger.info(f"✓ Primary OCR method '{primary_method}' is correctly configured and available")
+
         return pipeline
+
     except Exception as e:
         logger.error(f"Failed to initialize Enhanced LLM OCR Pipeline: {e}")
         return None
@@ -202,9 +210,7 @@ def get_enhanced_ocr_pipeline(config):
 
 @st.cache_data
 def load_config():
-    """
-    FIXED: Loads configuration with API key masking and centralized settings (No EasyOCR).
-    """
+    """UPDATED: Load configuration with proper TOML structure mapping"""
     config = {}
     logger.info("Loading configuration...")
     try:
@@ -216,7 +222,10 @@ def load_config():
                 config_toml = dict(tomllib.load(f))
             logger.info("Loaded config from config.toml")
 
-            # CENTRALIZED: Load all configuration from TOML
+            # FIXED: Direct TOML structure preservation
+            config = config_toml.copy()
+
+            # BACKWARD COMPATIBILITY: Also create flat keys for legacy code
             llm_config = config_toml.get("llm", {})
             config['LLM_MODEL'] = llm_config.get("model")
             config['LLM_API_KEY'] = llm_config.get("api_key")
@@ -231,85 +240,47 @@ def load_config():
             config['TRIPLE_EXTRACTION_MAX_TOKENS'] = triple_config.get("max_tokens", 2000)
             config['TRIPLE_EXTRACTION_TEMPERATURE'] = triple_config.get("temperature", 0.1)
 
-            # LLM OCR API keys from centralized location
-            config['MISTRAL_API_KEY'] = llm_config.get("ocr", {}).get("mistral_api_key")
-            config['GEMINI_API_KEY'] = llm_config.get("ocr", {}).get("gemini_api_key")
-            config['OPENAI_API_KEY'] = llm_config.get("ocr", {}).get("openai_api_key")
-            config['ANTHROPIC_API_KEY'] = llm_config.get("ocr", {}).get("anthropic_api_key")
-
-            # CENTRALIZED: Database configuration
+            # Database configuration
             neo4j_config = config_toml.get("neo4j", {})
             config['NEO4J_URI'] = neo4j_config.get("uri")
             config['NEO4J_USER'] = neo4j_config.get("user")
             config['NEO4J_PASSWORD'] = neo4j_config.get("password")
             config['DB_NAME'] = neo4j_config.get("database", "neo4j")
 
-            # CENTRALIZED: Vector DB configuration
+            # Vector DB configuration
             vector_config = config_toml.get("vector_db", {})
             config['CHROMA_PERSIST_PATH'] = vector_config.get("persist_directory", "./chroma_db_pipeline")
             config['COLLECTION_NAME'] = vector_config.get("collection_name", "doc_pipeline_embeddings")
 
-            # CENTRALIZED: Embeddings configuration
+            # Embeddings configuration
             embedding_config = config_toml.get("embeddings", {})
             config['EMBEDDING_MODEL'] = embedding_config.get("model_name", "all-MiniLM-L6-v2")
 
-            # CENTRALIZED: Chunking configuration
+            # Chunking configuration
             chunk_config = config_toml.get("chunking", {})
             config['CHUNK_SIZE'] = chunk_config.get("chunk_size", 1000)
             config['CHUNK_OVERLAP'] = chunk_config.get("overlap", 100)
 
-            # CENTRALIZED: Feature flags
+            # Feature flags
             config['STANDARDIZATION_ENABLED'] = config_toml.get("standardization", {}).get("enabled", True)
             config['INFERENCE_ENABLED'] = config_toml.get("inference", {}).get("enabled", True)
             config['CACHE_ENABLED'] = config_toml.get("caching", {}).get("enabled", True)
 
-            # CENTRALIZED: LLM OCR configuration (No EasyOCR)
-            ocr_config = config_toml.get("ocr", {})
-            config['OCR_PRIMARY_METHOD'] = ocr_config.get("primary_method", "gemini")
-            config['OCR_FALLBACK_ENABLED'] = ocr_config.get("fallback_enabled", True)
-            config['OCR_CONFIDENCE_THRESHOLD'] = ocr_config.get("confidence_threshold", 0.7)
-
-            # CENTRALIZED: NLP configuration
+            # NLP configuration
             nlp_config = config_toml.get("nlp", {})
             config['COREFERENCE_RESOLUTION_ENABLED'] = nlp_config.get("coreference_resolution_enabled", False)
             config['SPACY_MODEL_NAME'] = nlp_config.get("spacy_model_name", "en_core_web_trf")
 
-            # Pass full config sections for modules that need them
-            config['standardization'] = config_toml.get("standardization", {})
-            config['inference'] = config_toml.get("inference", {})
-            config['llm_full_config'] = config_toml.get("llm", {})
-
-            # FIXED: Include relationship inference configurations
-            config['relationship_inference'] = config_toml.get("relationship_inference", {})
-            config['within_community_inference'] = config_toml.get("within_community_inference", {})
-
         else:
             logger.warning("config.toml not found or tomllib not available")
 
-        # 2. DEPRECATED: graph_config.ini as fallback only (will be phased out)
-        config_path_ini = Path("graph_config.ini")
-        if config_path_ini.is_file():
-            neo4j_config_parser = configparser.ConfigParser()
-            neo4j_config_parser.read(config_path_ini)
-
-            # Only use as fallback if not already set
-            config.setdefault('NEO4J_URI', neo4j_config_parser.get("neo4j", "uri", fallback=None))
-            config.setdefault('NEO4J_USER', neo4j_config_parser.get("neo4j", "user", fallback=None))
-            config.setdefault('NEO4J_PASSWORD', neo4j_config_parser.get("neo4j", "password", fallback=None))
-
-            logger.info("Loaded fallback config from graph_config.ini (DEPRECATED)")
-
-        # 3. Environment Variables (Highest Priority)
+        # 2. Environment Variables (Highest Priority)
         config['NEO4J_URI'] = os.getenv('NEO4J_URI', config.get('NEO4J_URI'))
         config['NEO4J_USER'] = os.getenv('NEO4J_USER', config.get('NEO4J_USER'))
         config['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD', config.get('NEO4J_PASSWORD'))
         config['LLM_API_KEY'] = os.getenv('LLM_API_KEY', os.getenv('GOOGLE_API_KEY', config.get('LLM_API_KEY')))
-        config['MISTRAL_API_KEY'] = os.getenv('MISTRAL_API_KEY', config.get('MISTRAL_API_KEY'))
-        config['GEMINI_API_KEY'] = os.getenv('GEMINI_API_KEY', config.get('GEMINI_API_KEY'))
-        config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY', config.get('OPENAI_API_KEY'))
-        config['ANTHROPIC_API_KEY'] = os.getenv('ANTHROPIC_API_KEY', config.get('ANTHROPIC_API_KEY'))
 
-        # 4. Final Validation
+        # 3. Final Validation
         required_for_qa = ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD', 'LLM_MODEL', 'LLM_API_KEY', 'EMBEDDING_MODEL',
                            'CHROMA_PERSIST_PATH', 'COLLECTION_NAME', 'DB_NAME']
         missing_keys = [k for k in required_for_qa if not config.get(k)]
@@ -320,10 +291,12 @@ def load_config():
         else:
             config['_CONFIG_VALID'] = True
 
-        logger.info("Configuration loading process complete")
+        logger.info("✅ Configuration loading complete with proper TOML structure preservation")
 
         # FIXED: Log configuration summary with masked sensitive data
         masked_config = get_masked_config_for_logging(config)
+        primary_method = config.get('llm', {}).get('ocr', {}).get('primary_method', 'unknown')
+        logger.info(f"🎯 OCR Primary Method from config: {primary_method}")
         logger.debug(
             f"Config Summary: LLM_MODEL={masked_config.get('LLM_MODEL')}, NEO4J_URI={masked_config.get('NEO4J_URI')}")
 
@@ -543,6 +516,58 @@ def get_nlp_pipeline(config):
     except Exception as e:
         logger.error(f"Error loading spaCy NLP pipeline '{model_name}': {e}")
         return None
+
+
+def process_documents_batch(uploaded_files, enhanced_ocr_pipeline, save_to_disk=True):
+    """
+    MISSING FUNCTION IMPLEMENTATION: Process multiple documents with enhanced OCR pipeline.
+    This function was imported but didn't exist - now implemented properly.
+
+    Args:
+        uploaded_files: List of Streamlit uploaded file objects
+        enhanced_ocr_pipeline: The EnhancedOCRPipeline instance
+        save_to_disk: Whether to save results to local storage
+
+    Returns:
+        List of processing results with comprehensive metadata
+    """
+    logger.info(f"🔄 Processing batch of {len(uploaded_files)} documents")
+
+    # Use the existing batch processing function from processing_pipeline
+    from src.utils.processing_pipeline import process_batch_with_enhanced_storage
+
+    try:
+        batch_results = process_batch_with_enhanced_storage(
+            uploaded_files=uploaded_files,
+            enhanced_ocr_pipeline=enhanced_ocr_pipeline,
+            save_to_disk=save_to_disk
+        )
+
+        # Add summary statistics
+        successful = sum(1 for r in batch_results if r.get('success', False))
+        total_text_length = sum(r.get('text_length', 0) for r in batch_results)
+
+        logger.info(
+            f"✅ Batch processing complete: {successful}/{len(uploaded_files)} successful, {total_text_length} total characters extracted")
+
+        return batch_results
+
+    except Exception as e:
+        logger.error(f"❌ Batch processing failed: {e}")
+        # Return error results for each file
+        return [
+            {
+                'success': False,
+                'ocr_text': None,
+                'error': str(e),
+                'saved_files': None,
+                'text_length': 0,
+                'original_filename': getattr(f, 'name', 'unknown'),
+                'file_type': getattr(f, 'type', 'unknown'),
+                'processing_status': 'failed'
+            }
+            for f in uploaded_files
+        ]
 
 
 def main():

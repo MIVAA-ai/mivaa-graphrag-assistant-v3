@@ -1,341 +1,356 @@
-# pages/3_Data_Extraction_Validation.py
+# pages/3_Pipeline_Validation.py
 
 import streamlit as st
-# st.set_page_config(page_title="Data Extraction Validation")
 import time
-import logging
 import pandas as pd
-from typing import List, Any, Dict
+import json
+from datetime import datetime
 
-# Import your existing components
+# Page configuration
+st.set_page_config(
+    page_title="Pipeline Validation",
+    page_icon="🔍",
+    layout="wide"
+)
+
+# EXACT same styling as OCR Output Analyzer
+st.markdown("""
+<style>
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 12px;
+        text-align: center;
+        color: white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 0.5rem;
+    }
+    .metric-label {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-weight: 500;
+        font-size: 0.875rem;
+        margin: 0.25rem;
+    }
+    .status-success {
+        background: rgba(16, 185, 129, 0.1);
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+    .status-warning {
+        background: rgba(245, 158, 11, 0.1);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+    .status-error {
+        background: rgba(239, 68, 68, 0.1);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+    .info-box {
+        background: #f8f9fa;
+        border-left: 4px solid #007bff;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 0 8px 8px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# EXACT same imports as OCR Output Analyzer - NO complex validation modules
 try:
-    from GraphRAG_Document_AI_Platform import load_config, get_mistral_client
-    from src.utils.pipeline_validation import create_validator
+    from GraphRAG_Document_AI_Platform import load_config, get_enhanced_ocr_pipeline
+    from src.utils.processing_pipeline import process_uploaded_file_ocr_with_storage
 except ImportError as e:
-    st.error(f"Import error: {e}")
+    st.error(f"❌ Import error: {e}")
     st.stop()
 
-# Setup logging
-logger = logging.getLogger(__name__)
 
-st.title("🔍 Pipeline Validation & Quality Check")
-st.write("Test your document processing pipeline accuracy before running full ingestion jobs.")
-
-# Load configuration and resources
+# EXACT same resource loading as OCR Output Analyzer
 @st.cache_resource
-def get_validation_resources():
-    """Load and cache validation resources."""
+def get_resources():
+    """Load the same resources as OCR Output Analyzer"""
     try:
         config = load_config()
-        mistral_client = get_mistral_client(config.get('MISTRAL_API_KEY'))
-        validator = create_validator(config, mistral_client)
-        return config, validator, None
+        enhanced_ocr_pipeline = get_enhanced_ocr_pipeline(config)
+        return config, enhanced_ocr_pipeline, None
     except Exception as e:
         return None, None, str(e)
 
 
-config, validator, error = get_validation_resources()
+def validate_single_document(file, enhanced_ocr_pipeline):
+    """Validate a single document using the EXACT same process as OCR Analyzer"""
+    try:
+        start_time = time.time()
+
+        # Use the EXACT same function that works in OCR Analyzer
+        result = process_uploaded_file_ocr_with_storage(
+            uploaded_file=file,
+            enhanced_ocr_pipeline=enhanced_ocr_pipeline,
+            save_to_disk=False  # Don't save during validation
+        )
+
+        processing_time = time.time() - start_time
+
+        # Extract validation metrics
+        confidence = result.get('confidence', 0.0)
+        text_length = result.get('text_length', 0)
+        method_used = result.get('method_used', 'unknown')
+        success = result.get('success', False)
+        error_msg = result.get('error', '')
+
+        # Simple quality assessment
+        if confidence >= 0.8:
+            quality = "🟢 Excellent"
+            recommendation = "Auto-process"
+        elif confidence >= 0.6:
+            quality = "🔵 Good"
+            recommendation = "Monitor"
+        elif confidence >= 0.4:
+            quality = "🟡 Fair"
+            recommendation = "Review"
+        else:
+            quality = "🔴 Poor"
+            recommendation = "Manual"
+
+        return {
+            'file_name': file.name,
+            'success': success,
+            'confidence': confidence,
+            'text_length': text_length,
+            'processing_time': processing_time,
+            'method': method_used,
+            'quality': quality,
+            'recommendation': recommendation,
+            'error': error_msg
+        }
+
+    except Exception as e:
+        return {
+            'file_name': file.name,
+            'success': False,
+            'confidence': 0.0,
+            'text_length': 0,
+            'processing_time': 0.0,
+            'method': 'error',
+            'quality': "🔴 Error",
+            'recommendation': "Check file",
+            'error': str(e)
+        }
+
+
+def validate_batch(files, enhanced_ocr_pipeline):
+    """Validate multiple documents using the same approach as OCR Analyzer"""
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, file in enumerate(files):
+        status_text.text(f"Processing {file.name}...")
+        result = validate_single_document(file, enhanced_ocr_pipeline)
+        results.append(result)
+        progress_bar.progress((i + 1) / len(files))
+
+    status_text.text("Validation complete!")
+
+    # Calculate summary
+    successful = [r for r in results if r['success']]
+    total = len(results)
+    success_rate = len(successful) / total if total > 0 else 0
+    avg_confidence = sum(r['confidence'] for r in successful) / len(successful) if successful else 0
+
+    return {
+        'results': results,
+        'total_files': total,
+        'successful_files': len(successful),
+        'success_rate': success_rate,
+        'avg_confidence': avg_confidence
+    }
+
+
+# Load resources - EXACT same pattern as OCR Output Analyzer
+config, enhanced_ocr_pipeline, error = get_resources()
 
 if error:
-    st.error(f"Failed to initialize validation resources: {error}")
+    st.error(f"❌ Failed to initialize: {error}")
     st.stop()
 
-if not validator:
-    st.error("Validator not initialized. Check your configuration.")
+if not enhanced_ocr_pipeline:
+    st.error("❌ Enhanced OCR pipeline not available")
     st.stop()
 
-# Main UI
-col1, col2 = st.columns([2, 1])
+# Main interface - Clean and minimal
+st.title("🔍 Pipeline Validation")
+st.markdown("Test document processing quality before batch operations")
 
-with col1:
-    st.header("📋 Document Quality Assessment")
-
-with col2:
-    st.info("💡 **Tip**: Test 3-5 representative documents to assess batch quality")
-
-# File uploader
+# File upload
 validation_files = st.file_uploader(
-    "Upload documents to test pipeline accuracy:",
-    type=["pdf", "png", "jpg", "jpeg", "txt"],
+    "Upload test documents:",
+    type=["pdf", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
-    help="Upload representative documents from your batch to test processing quality"
+    help="Upload 3-5 representative documents"
 )
 
-# Show file info if files uploaded
 if validation_files:
-    with st.expander(f"📁 Uploaded Files ({len(validation_files)})", expanded=False):
-        for i, file in enumerate(validation_files):
-            st.write(f"{i + 1}. **{file.name}** ({file.type}, {len(file.getvalue()):,} bytes)")
+    # Show files
+    st.write(f"**{len(validation_files)} files selected**")
 
-# Validation controls
-if validation_files:
-    col1, col2, col3 = st.columns([1, 1, 2])
+    # Show uploaded files table (same as OCR Analyzer)
+    file_data = []
+    for file in validation_files:
+        file_data.append({
+            "File": file.name,
+            "Type": file.type.split('/')[-1].upper(),
+            "Size": f"{len(file.getvalue()) / 1024:.1f} KB"
+        })
+    st.dataframe(pd.DataFrame(file_data), use_container_width=True, hide_index=True)
 
-    with col1:
-        run_validation = st.button("🧪 Run Quick Validation", type="primary", use_container_width=True)
+    # Process button
+    if st.button("🔬 Run Validation", type="primary", use_container_width=True):
 
-    with col2:
-        if len(validation_files) > 5:
-            st.warning(
-                f"⚠️ {len(validation_files)} files selected. Consider testing with 3-5 representative files first.")
-
-    # Run validation
-    if run_validation:
-        st.header("📊 Validation Results")
-
-        # Progress tracking
-        progress_container = st.container()
-        with progress_container:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-            # Track timing
+        with st.spinner("Validating documents..."):
             start_time = time.time()
+            report = validate_batch(validation_files, enhanced_ocr_pipeline)
+            total_time = time.time() - start_time
 
-            # Process files
-            try:
-                status_text.text("Starting validation...")
+        st.success(f"✅ Completed in {total_time:.1f}s")
 
-                # Run batch validation
-                with st.spinner("Validating documents..."):
-                    report = validator.validate_batch_quick(validation_files)
+        # Summary metrics - EXACT same styling as OCR Analyzer
+        st.subheader("📊 Summary")
 
-                processing_time = time.time() - start_time
-                progress_bar.progress(1.0)
-                status_text.text(f"Validation completed in {processing_time:.1f}s")
+        col1, col2, col3, col4 = st.columns(4)
 
-                # Display results
-                st.success("Validation completed successfully!")
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value">{report['success_rate']:.0%}</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                # Summary metrics
-                st.subheader("📈 Summary Metrics")
-                summary = report['summary']
+        with col2:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value">{report['avg_confidence']:.2f}</div>
+                <div class="metric-label">Avg Confidence</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+        with col3:
+            excellent = sum(1 for r in report['results'] if r['confidence'] >= 0.8)
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value">{excellent}</div>
+                <div class="metric-label">Excellent</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                with metric_col1:
-                    ocr_rate = summary['ocr_success_rate']
-                    st.metric(
-                        "OCR Success Rate",
-                        f"{ocr_rate:.1%}",
-                        delta=f"{summary['total_files']} files tested"
-                    )
+        with col4:
+            poor = sum(1 for r in report['results'] if r['confidence'] < 0.4)
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value">{poor}</div>
+                <div class="metric-label">Need Review</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-                with metric_col2:
-                    confidence = summary['average_confidence_score']
-                    st.metric(
-                        "Avg Confidence",
-                        f"{confidence:.2f}",
-                        delta="Higher is better"
-                    )
+        # Results table - Same format as OCR Analyzer
+        st.subheader("📋 Results")
 
-                with metric_col3:
-                    financial = summary['financial_documents']
-                    st.metric(
-                        "Business Documents",
-                        f"{financial}/{summary['total_files']}",
-                        delta="Contains financial data"
-                    )
+        results_data = []
+        for result in report['results']:
+            results_data.append({
+                'Document': result['file_name'],
+                'Status': '✅ Success' if result['success'] else '❌ Failed',
+                'Method': result['method'].upper(),
+                'Confidence': f"{result['confidence']:.3f}",
+                'Quality': result['quality'],
+                'Text Length': f"{result['text_length']:,}",
+                'Time': f"{result['processing_time']:.1f}s",
+                'Action': result['recommendation']
+            })
 
-                with metric_col4:
-                    avg_time = summary['total_validation_time'] / summary['total_files']
-                    st.metric(
-                        "Avg Processing Time",
-                        f"{avg_time:.1f}s",
-                        delta="Per document"
-                    )
+        st.dataframe(pd.DataFrame(results_data), use_container_width=True, hide_index=True)
 
-                # Results table
-                st.subheader("📄 File-by-File Results")
+        # Recommendations - Same styling as OCR Analyzer
+        st.subheader("💡 Recommendations")
 
-                # Prepare data for display
-                results_data = []
-                for result in report['results']:
-                    results_data.append({
-                        'File Name': result['file_name'],
-                        'Type': result['file_type'],
-                        'Size': f"{result['file_size']:,} bytes",
-                        'OCR Success': '✅' if result['mistral_ocr_success'] else '❌',
-                        'Text Length': f"{result['mistral_text_length']:,}" if result[
-                                                                                   'mistral_text_length'] > 0 else '0',
-                        'Confidence': f"{result['confidence_score']:.2f}",
-                        'Quality Score': f"{result['text_quality_score']:.2f}",
-                        'Chunks': str(result['num_chunks']),
-                        'Recommendation': result['processing_recommendation'],
-                        'Has Tables': '📊' if result['contains_tables'] else '',
-                        'Has Handwriting': '✍️' if result['contains_handwriting_indicators'] else '',
-                        'Processing Time': f"{result['mistral_extraction_time']:.1f}s"
-                    })
+        total = len(report['results'])
+        excellent = sum(1 for r in report['results'] if r['confidence'] >= 0.8)
+        poor = sum(1 for r in report['results'] if r['confidence'] < 0.4)
 
-                df = pd.DataFrame(results_data)
+        if excellent >= total * 0.8:
+            st.markdown('<div class="status-badge status-success">🚀 Ready for batch processing</div>',
+                        unsafe_allow_html=True)
+        elif poor > 0:
+            st.markdown('<div class="status-badge status-error">⚠️ Manual review required</div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="status-badge status-warning">📊 Proceed with monitoring</div>',
+                        unsafe_allow_html=True)
 
+        # Show errors if any
+        errors = [r for r in report['results'] if not r['success']]
+        if errors:
+            st.subheader("❌ Processing Errors")
+            for error in errors:
+                st.error(f"**{error['file_name']}**: {error['error']}")
 
-                # Color-code the confidence column
-                def style_confidence(df):
-                    """Apply color styling to the confidence column."""
-                    # Create a style dataframe with empty strings
-                    styles = pd.DataFrame('', index=df.index, columns=df.columns)
+        # Export - Same as OCR Analyzer
+        st.subheader("📥 Export")
 
-                    # Apply styling only to the Confidence column
-                    if 'Confidence' in df.columns:
-                        confidence_col = df['Confidence']
-                        for idx in df.index:
-                            try:
-                                score = float(confidence_col[idx])
-                                if score >= 0.8:
-                                    styles.loc[idx, 'Confidence'] = 'background-color: #d4edda'  # Light green
-                                elif score >= 0.6:
-                                    styles.loc[idx, 'Confidence'] = 'background-color: #fff3cd'  # Light yellow
-                                elif score >= 0.4:
-                                    styles.loc[idx, 'Confidence'] = 'background-color: #f8d7da'  # Light red
-                                else:
-                                    styles.loc[idx, 'Confidence'] = 'background-color: #f5c6cb'  # Darker red
-                            except (ValueError, TypeError):
-                                continue
+        col1, col2 = st.columns(2)
 
-                    return styles
+        with col1:
+            csv_data = pd.DataFrame(results_data).to_csv(index=False)
+            st.download_button(
+                "📊 Download CSV",
+                data=csv_data,
+                file_name=f"validation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
-
-                st.dataframe(
-                    df.style.apply(style_confidence, axis=None),
-                    use_container_width=True,
-                    height=400
-                )
-
-                # Recommendations section
-                st.subheader("💡 Processing Recommendations")
-
-                recommendations = report['recommendations']
-                for rec in recommendations:
-                    if rec.startswith('🚀'):
-                        st.success(rec)
-                    elif rec.startswith('✅'):
-                        st.success(rec)
-                    elif rec.startswith('⚠️'):
-                        st.warning(rec)
-                    elif rec.startswith('❌'):
-                        st.error(rec)
-                    else:
-                        st.info(rec)
-
-                # Detailed analysis
-                with st.expander("🔍 Detailed Analysis", expanded=False):
-
-                    # File categorization
-                    excellent_files = [r for r in report['results'] if r['confidence_score'] >= 0.8]
-                    good_files = [r for r in report['results'] if 0.6 <= r['confidence_score'] < 0.8]
-                    fair_files = [r for r in report['results'] if 0.4 <= r['confidence_score'] < 0.6]
-                    poor_files = [r for r in report['results'] if r['confidence_score'] < 0.4]
-
-                    cat_col1, cat_col2, cat_col3, cat_col4 = st.columns(4)
-
-                    with cat_col1:
-                        st.metric("Excellent (≥0.8)", len(excellent_files), "Auto-process")
-                    with cat_col2:
-                        st.metric("Good (0.6-0.8)", len(good_files), "Monitor")
-                    with cat_col3:
-                        st.metric("Fair (0.4-0.6)", len(fair_files), "Review")
-                    with cat_col4:
-                        st.metric("Poor (<0.4)", len(poor_files), "Manual")
-
-                    # Show problematic files
-                    if poor_files:
-                        st.write("**Files needing attention:**")
-                        for file in poor_files:
-                            error_msg = file.get('ocr_error_message', 'Quality issues detected')
-                            st.write(f"• **{file['file_name']}**: {error_msg}")
-
-                # Export results
-                st.subheader("📥 Export Results")
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    # Download detailed report
-                    import json
-
-                    report_json = json.dumps(report, indent=2, default=str)
-                    st.download_button(
-                        "📊 Download Detailed Report (JSON)",
-                        data=report_json,
-                        file_name=f"validation_report_{int(time.time())}.json",
-                        mime="application/json",
-                        use_container_width=True
-                    )
-
-                with col2:
-                    # Download summary CSV
-                    csv_data = df.to_csv(index=False)
-                    st.download_button(
-                        "📋 Download Summary (CSV)",
-                        data=csv_data,
-                        file_name=f"validation_summary_{int(time.time())}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-
-            except Exception as e:
-                st.error(f"Validation failed: {str(e)}")
-                logger.error(f"Validation error: {e}", exc_info=True)
+        with col2:
+            report_json = json.dumps(report, indent=2, default=str)
+            st.download_button(
+                "📋 Download Report",
+                data=report_json,
+                file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
 
 else:
-    # Show help when no files uploaded
-    st.info("👆 Upload some documents to start validation testing")
+    st.info("👆 Upload documents to start validation")
 
-    # Example section
-    st.subheader("📖 How to Use This Tool")
+    # Quick help
+    with st.expander("💡 How to Use"):
+        st.markdown("""
+        **Quick Start:**
+        1. Upload 3-5 test documents
+        2. Click Run Validation 
+        3. Review quality scores
+        4. Follow recommendations
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("**Step 1: Upload Test Documents**")
-        st.write("• Select 3-5 representative documents")
-        st.write("• Choose different types (scanned, digital, handwritten)")
-        st.write("• Mix of good and potentially problematic files")
-
-        st.write("**Step 3: Review Results**")
-        st.write("• Check confidence scores for each file")
-        st.write("• Identify files needing manual review")
-        st.write("• Note processing time estimates")
-
-    with col2:
-        st.write("**Step 2: Run Validation**")
-        st.write("• Click 'Run Quick Validation'")
-        st.write("• Wait for OCR and quality analysis")
-        st.write("• Review success rates and recommendations")
-
-        st.write("**Step 4: Optimize Pipeline**")
-        st.write("• Adjust settings based on results")
-        st.write("• Set up manual review workflows")
-        st.write("• Process with confidence")
-
-# Help section
-with st.expander("ℹ️ Understanding Results"):
-    st.write("""
-    **Confidence Score Meaning:**
-    - **0.8+ (Excellent)**: Process automatically, high success expected
-    - **0.6-0.8 (Good)**: Process with monitoring, mostly successful
-    - **0.4-0.6 (Fair)**: Manual review recommended before processing
-    - **0.0-0.4 (Poor)**: Manual processing needed, automation likely to fail
-
-    **Quality Indicators:**
-    - **📊 Has Tables**: Document contains structured tabular data
-    - **✍️ Has Handwriting**: Potential handwritten content detected
-    - **OCR Success**: Whether text extraction worked
-    - **Text Length**: Amount of text successfully extracted
-
-    **When to Use This Tool:**
-    - Before processing new document batches
-    - When document quality/sources change
-    - If extraction results seem poor
-    - For regular quality audits
-
-    **Cost Optimization:**
-    - Identify documents that will fail before spending API credits
-    - Route low-quality documents to manual review
-    - Optimize batch processing based on confidence scores
-    """)
-
-# Footer
-st.markdown("---")
-st.caption("💡 Pro tip: Run validation on a sample before processing large batches to save time and API costs.")
+        **Quality Levels:**
+        - 🟢 **Excellent (≥0.8)**: Auto-process
+        - 🔵 **Good (0.6-0.8)**: Monitor  
+        - 🟡 **Fair (0.4-0.6)**: Review
+        - 🔴 **Poor (<0.4)**: Manual
+        """)
