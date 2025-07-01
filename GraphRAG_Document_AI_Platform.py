@@ -40,7 +40,7 @@ except ImportError:
 # Core Logic Imports
 try:
     from neo4j_exporter import Neo4jExporter
-    from graph_rag_qa import GraphRAGQA
+    from enhanced_graph_rag_qa import EnhancedGraphRAGQA
     from llama_index.llms.gemini import Gemini
     import chromadb
     from chromadb.utils import embedding_functions
@@ -450,19 +450,26 @@ def init_neo4j_exporter(uri, user, password):
 
 @st.cache_resource
 def load_qa_engine(config, _correction_llm):
-    """Initializes and returns the GraphRAGQA engine."""
-    logger.info("Initializing GraphRAGQA Engine resource...")
+    """Initializes and returns the Enhanced GraphRAGQA engine."""
+    logger.info("Initializing Enhanced GraphRAGQA Engine resource...")
     if not config or not config.get('_CONFIG_VALID', False):
-        logger.error("Config invalid, cannot initialize GraphRAGQA engine")
+        logger.error("Config invalid, cannot initialize Enhanced GraphRAGQA engine")
         return None
 
     try:
-        # FIXED: Mask sensitive data in logs
+        # ENHANCED: Extract universal settings from config
+        universal_config = config.get('universal', {})
+        query_config = config.get('query_engine', {})
+
+        # Mask sensitive data for logging
         masked_password = mask_sensitive_data(config['NEO4J_PASSWORD'])
         masked_api_key = mask_sensitive_data(config['LLM_API_KEY'])
-        logger.info(f"Initializing QA engine with Neo4j password: {masked_password}, LLM key: {masked_api_key}")
+        logger.info(
+            f"Initializing Enhanced QA engine with Neo4j password: {masked_password}, LLM key: {masked_api_key}")
 
-        engine = GraphRAGQA(
+        # UPDATED: Use EnhancedGraphRAGQA instead of GraphRAGQA
+        engine = EnhancedGraphRAGQA(
+            # Your existing parameters (unchanged)
             neo4j_uri=config['NEO4J_URI'],
             neo4j_user=config['NEO4J_USER'],
             neo4j_password=config['NEO4J_PASSWORD'],
@@ -475,18 +482,35 @@ def load_qa_engine(config, _correction_llm):
             collection_name=config['COLLECTION_NAME'],
             db_name=config['DB_NAME'],
             llm_config_extra=config.get('LLM_EXTRA_PARAMS', {}),
-            max_cypher_retries=config.get('max_cypher_retries', 1)
+            max_cypher_retries=config.get('max_cypher_retries', 2),
+
+            # NEW ENHANCED PARAMETERS
+            enable_universal_patterns=universal_config.get('enable_universal_patterns', True),
+            manual_industry=universal_config.get('manual_industry', None),
+            pattern_confidence_threshold=universal_config.get('confidence_threshold', 0.6),
+            fuzzy_threshold=query_config.get('entity_linking_fuzzy_threshold', 70),
+            enable_query_caching=query_config.get('enable_query_caching', True)
         )
 
-        logger.info(f"GraphRAGQA Engine resource initialized. Ready: {engine.is_ready()}")
+        logger.info(f"Enhanced GraphRAGQA Engine resource initialized. Ready: {engine.is_ready()}")
 
+        # Enhanced status checking
         if not engine.is_ready() and 'streamlit' in sys.modules:
-            st.warning("Q&A Engine initialized but may not be fully ready (check Neo4j/LLM status)", icon="⚠️")
+            st.warning("Enhanced Q&A Engine initialized but may not be fully ready (check Neo4j/LLM status)", icon="⚠️")
+
+        # Log enhancement status
+        if hasattr(engine, 'is_enhanced') and engine.is_enhanced():
+            industry_info = engine.get_industry_info()
+            detected_industry = industry_info.get('detected_industry', 'unknown')
+            logger.info(f"✅ Universal enhancements active. Detected industry: {detected_industry}")
+        else:
+            logger.info("ℹ️ Running in base mode (universal enhancements disabled or failed)")
+
         return engine
     except Exception as e:
-        logger.error(f"GraphRAGQA Engine initialization failed: {e}")
+        logger.error(f"Enhanced GraphRAGQA Engine initialization failed: {e}")
         if 'streamlit' in sys.modules:
-            st.error(f"Failed to initialize Q&A Engine: {e}")
+            st.error(f"Failed to initialize Enhanced Q&A Engine: {e}")
         return None
 
 

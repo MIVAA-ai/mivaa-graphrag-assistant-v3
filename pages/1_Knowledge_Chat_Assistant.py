@@ -16,329 +16,295 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Elegant and subtle styling
+# Modern, clean styling focused on chat experience
 st.markdown("""
 <style>
-    /* Import sophisticated fonts */
+    /* Import modern fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
-    /* Elegant color palette */
+    /* Modern color palette */
     :root {
-        /* Sophisticated neutrals */
-        --elegant-slate-50: #f8fafc;
-        --elegant-slate-100: #f1f5f9;
-        --elegant-slate-200: #e2e8f0;
-        --elegant-slate-300: #cbd5e1;
-        --elegant-slate-400: #94a3b8;
-        --elegant-slate-500: #64748b;
-        --elegant-slate-600: #475569;
-        --elegant-slate-700: #334155;
-        --elegant-slate-800: #1e293b;
-        --elegant-slate-900: #0f172a;
-
-        /* Refined accent colors */
-        --elegant-blue: #3b82f6;
-        --elegant-blue-light: #60a5fa;
-        --elegant-emerald: #10b981;
-        --elegant-amber: #f59e0b;
-        --elegant-rose: #f43f5e;
-
-        /* Elegant shadows */
-        --elegant-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-        --elegant-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-        --elegant-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        --elegant-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-
-        /* Subtle gradients */
-        --elegant-gradient-blue: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        --elegant-gradient-emerald: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        --elegant-gradient-surface: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --bg-chat: #ffffff;
+        --border-light: #e2e8f0;
+        --border-hover: #cbd5e1;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --text-muted: #94a3b8;
+        --accent-blue: #3b82f6;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        --radius-lg: 12px;
+        --radius-xl: 16px;
     }
 
-    /* Base styling with elegance */
-    .main {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        background: var(--elegant-slate-50);
-        color: var(--elegant-slate-700);
-        line-height: 1.7;
-    }
-
-    /* Hide Streamlit branding elegantly */
+    /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* Elegant main header */
-    .elegant-header {
-        background: linear-gradient(135deg, #1e293b 0%, #334155 100%); /* Darker, more sophisticated slate gradient */
-        padding: 2rem 2.5rem; /* Reduced from 3rem to 2rem for smaller size */
-        border-radius: 20px;
-        margin-bottom: 2.5rem;
-        box-shadow: var(--elegant-shadow-lg);
-        position: relative;
-        overflow: hidden;
-        backdrop-filter: blur(10px);
+    /* Base styling */
+    .main {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        line-height: 1.6;
     }
 
-    .elegant-header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Ccircle cx='30' cy='30' r='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-        animation: elegant-drift 30s infinite linear; /* Slower, more subtle animation */
+    /* Compact header - much smaller */
+    .compact-header {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        padding: 1rem 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: var(--shadow-sm);
+        text-align: center;
     }
 
-    @keyframes elegant-drift {
-        0% { transform: translateX(0) translateY(0); }
-        100% { transform: translateX(-60px) translateY(-60px); }
-    }
-
-    .elegant-header h1 {
-        color: white;
-        font-weight: 300;
-        font-size: 2rem; /* Reduced from 2.5rem for more elegant proportions */
-        letter-spacing: -0.02em;
+    .compact-header h1 {
+        color: var(--text-primary);
+        font-size: 1.5rem;
+        font-weight: 600;
         margin: 0;
-        text-align: center;
-        position: relative;
-        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
     }
 
-    .elegant-header p {
-        color: rgba(255, 255, 255, 0.75); /* Slightly more muted opacity */
-        font-weight: 300; /* Lighter weight for more elegance */
-        font-size: 0.95rem; /* Reduced from 1.125rem for subtle sophistication */
-        margin: 0.75rem 0 0 0; /* Reduced top margin */
-        text-align: center;
-        position: relative;
-        z-index: 1;
-        letter-spacing: 0.01em; /* Subtle letter spacing for refinement */
+    .compact-header p {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin: 0.25rem 0 0 0;
+        font-weight: 400;
     }
 
-    /* Sophisticated buttons */
+    /* Enhanced chat messages - reduced spacing */
+    .stChatMessage {
+        background: var(--bg-chat) !important;
+        border: 1px solid var(--border-light) !important;
+        border-radius: var(--radius-xl) !important;
+        padding: 1rem !important;
+        margin: 0.5rem 0 !important;
+        box-shadow: var(--shadow-sm) !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .stChatMessage:hover {
+        border-color: var(--border-hover) !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    /* Single container for question-answer pairs */
+    .chat-pair {
+        background: var(--bg-chat);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-xl);
+        padding: 1.5rem;
+        margin: 0.75rem 0;
+        box-shadow: var(--shadow-sm);
+    }
+
+    /* User messages - part of pair */
+    .stChatMessage[data-testid="chat-message-user"] {
+        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
+        border-color: #bfdbfe !important;
+        margin: 0 0 0.5rem 0 !important;
+        border-radius: 12px 12px 4px 12px !important;
+    }
+
+    /* Assistant messages - part of pair */
+    .stChatMessage[data-testid="chat-message-assistant"] {
+        background: var(--bg-chat) !important;
+        border-color: var(--border-light) !important;
+        margin: 0 !important;
+        border-radius: 4px 12px 12px 12px !important;
+    }
+
+    /* Normal chat input - not fixed */
+    .stChatInput {
+        position: relative !important;
+        bottom: auto !important;
+        left: auto !important;
+        right: auto !important;
+        z-index: auto !important;
+        max-width: 100% !important;
+        margin: 1rem 0 !important;
+    }
+
+    .stChatInput > div {
+        background: var(--bg-primary) !important;
+        border: 2px solid var(--border-light) !important;
+        border-radius: var(--radius-xl) !important;
+        box-shadow: var(--shadow-sm) !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .stChatInput > div:focus-within {
+        border-color: var(--accent-blue) !important;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
+    }
+
+    .stChatInput textarea {
+        border: none !important;
+        font-size: 1rem !important;
+        line-height: 1.5 !important;
+        padding: 1rem 1.25rem !important;
+        min-height: 2.5rem !important;
+        resize: none !important;
+        background: transparent !important;
+    }
+
+    .stChatInput textarea::placeholder {
+        color: var(--text-muted) !important;
+        font-style: italic !important;
+    }
+
+    /* Better buttons */
     .stButton > button {
-        background: var(--elegant-gradient-blue);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 0.875rem 2rem;
-        font-weight: 500;
-        font-family: 'Inter', sans-serif;
-        font-size: 0.95rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.25);
-        position: relative;
-        overflow: hidden;
-    }
-
-    .stButton > button::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-        transition: left 0.5s ease;
+        background: var(--accent-blue) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: var(--radius-lg) !important;
+        padding: 0.75rem 1.5rem !important;
+        font-weight: 500 !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 0.875rem !important;
+        transition: all 0.2s ease !important;
+        box-shadow: var(--shadow-sm) !important;
     }
 
     .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.35);
+        background: #2563eb !important;
+        transform: translateY(-1px) !important;
+        box-shadow: var(--shadow-md) !important;
     }
 
-    .stButton > button:hover::before {
-        left: 100%;
-    }
-
-    /* Elegant status indicators */
-    .elegant-status {
+    /* Status indicators */
+    .status-indicator {
         display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        border-radius: 24px;
-        font-size: 0.875rem;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
         font-weight: 500;
-        backdrop-filter: blur(8px);
-        transition: all 0.2s ease;
-    }
-
-    .elegant-status:hover {
-        transform: translateY(-1px);
-        box-shadow: var(--elegant-shadow-sm);
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
     }
 
     .status-online {
         background: rgba(16, 185, 129, 0.1);
-        border: 1px solid rgba(16, 185, 129, 0.2);
-        color: var(--elegant-emerald);
+        color: var(--accent-green);
     }
 
     .status-offline {
-        background: rgba(244, 63, 94, 0.1);
-        border: 1px solid rgba(244, 63, 94, 0.2);
-        color: var(--elegant-rose);
+        background: rgba(239, 68, 68, 0.1);
+        color: var(--accent-red);
     }
 
-    /* Refined metric cards */
-    .elegant-metric-card {
-        background: var(--elegant-gradient-surface);
-        border: 1px solid var(--elegant-slate-200);
-        border-radius: 16px;
-        padding: 2rem;
+    /* Compact metrics */
+    .compact-metric {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        padding: 1rem;
         text-align: center;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-        backdrop-filter: blur(10px);
+        transition: all 0.2s ease;
     }
 
-    .elegant-metric-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--elegant-gradient-blue);
-        opacity: 0;
-        transition: opacity 0.3s ease;
+    .compact-metric:hover {
+        border-color: var(--border-hover);
+        box-shadow: var(--shadow-sm);
     }
 
-    .elegant-metric-card:hover {
-        transform: translateY(-3px);
-        box-shadow: var(--elegant-shadow-lg);
-        border-color: var(--elegant-slate-300);
+    .compact-metric-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
     }
 
-    .elegant-metric-card:hover::before {
-        opacity: 1;
-    }
-
-    .elegant-metric-value {
-        font-size: 2.5rem;
-        font-weight: 300;
-        color: var(--elegant-slate-800);
-        margin-bottom: 0.5rem;
-        line-height: 1;
-    }
-
-    .elegant-metric-label {
-        color: var(--elegant-slate-500);
-        font-size: 0.875rem;
+    .compact-metric-label {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
         font-weight: 500;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.025em;
     }
 
-    /* Performance indicators with elegance */
+    /* Performance indicators */
     .performance-indicator {
         display: inline-flex;
         align-items: center;
         gap: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        border-radius: 16px;
+        padding: 0.5rem 1rem;
+        border-radius: var(--radius-lg);
+        font-size: 0.875rem;
         font-weight: 500;
-        backdrop-filter: blur(8px);
-        transition: all 0.3s ease;
+        margin: 0.5rem 0;
     }
 
     .performance-good {
         background: rgba(16, 185, 129, 0.1);
-        border: 1px solid rgba(16, 185, 129, 0.2);
-        color: var(--elegant-emerald);
+        color: var(--accent-green);
     }
 
     .performance-medium {
         background: rgba(245, 158, 11, 0.1);
-        border: 1px solid rgba(245, 158, 11, 0.2);
-        color: var(--elegant-amber);
+        color: #f59e0b;
     }
 
     .performance-slow {
-        background: rgba(244, 63, 94, 0.1);
-        border: 1px solid rgba(244, 63, 94, 0.2);
-        color: var(--elegant-rose);
+        background: rgba(239, 68, 68, 0.1);
+        color: var(--accent-red);
     }
 
-    /* Elegant sidebar styling */
+    /* Sidebar improvements */
     .css-1d391kg {
-        background: var(--elegant-gradient-surface);
-        border-right: 1px solid var(--elegant-slate-200);
+        background: var(--bg-primary) !important;
+        border-right: 1px solid var(--border-light) !important;
     }
 
-    /* Refined chat interface */
-    .stChatMessage {
-        background: var(--elegant-gradient-surface);
-        border: 1px solid var(--elegant-slate-200);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: var(--elegant-shadow-sm);
-        transition: all 0.2s ease;
+    /* Chat container spacing - normal spacing */
+    .main .block-container {
+        padding-bottom: 2rem !important;
     }
 
-    .stChatMessage:hover {
-        box-shadow: var(--elegant-shadow);
-        border-color: var(--elegant-slate-300);
+    /* Success/error messages */
+    .stSuccess, .stError, .stWarning, .stInfo {
+        border-radius: var(--radius-lg) !important;
+        border: none !important;
+        box-shadow: var(--shadow-sm) !important;
     }
 
-    /* Elegant animations */
-    @keyframes elegant-fade-in {
-        from {
-            opacity: 0;
-            transform: translateY(10px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    .elegant-enter {
-        animation: elegant-fade-in 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    /* Responsive elegance */
+    /* Responsive adjustments */
     @media (max-width: 768px) {
-        .elegant-header {
-            padding: 2rem 1.25rem;
-            border-radius: 16px;
+        .stChatMessage {
+            margin: 0.25rem 0 !important;
         }
 
-        .elegant-header h1 {
-            font-size: 1.75rem;
+        .compact-header {
+            padding: 0.75rem 1rem;
         }
 
-        .elegant-header p {
-            font-size: 0.875rem;
-            margin-top: 0.5rem;
-        }
-
-        .elegant-metric-card {
-            padding: 1.5rem;
-        }
-
-        .elegant-metric-value {
-            font-size: 2rem;
+        .compact-header h1 {
+            font-size: 1.25rem;
         }
     }
 
-    /* Subtle loading states */
-    .elegant-spinner {
-        border: 2px solid var(--elegant-slate-200);
-        border-top: 2px solid var(--elegant-blue);
-        border-radius: 50%;
-        animation: elegant-spin 1s linear infinite;
+    /* Smooth animations */
+    .fade-in {
+        animation: fadeIn 0.3s ease-in;
     }
 
-    @keyframes elegant-spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -419,16 +385,16 @@ def format_timestamp(timestamp: str) -> str:
 # MAIN APPLICATION
 # ============================================================================
 
-# Elegant main header
+# Compact header instead of big banner
 st.markdown("""
-<div class="elegant-header elegant-enter">
+<div class="compact-header fade-in">
     <h1>🔍 Knowledge Assistant</h1>
-    <p>Intelligent document analysis powered by advanced AI</p>
+    <p>AI-powered document analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# SIDEBAR - Elegant Control Panel
+# SIDEBAR - Compact Control Panel
 # ============================================================================
 
 with st.sidebar:
@@ -441,8 +407,8 @@ with st.sidebar:
     neo4j_count = 0
 
     if IMPORTS_SUCCESSFUL:
-        # System initialization with elegant loading
-        with st.spinner("🔄 Initializing system..."):
+        # System initialization
+        with st.spinner("🔄 Initializing..."):
             try:
                 config = load_config()
                 if config and config.get('_CONFIG_VALID'):
@@ -461,32 +427,32 @@ with st.sidebar:
                 logger.error(f"System initialization error: {e}")
                 st.error(f"❌ Initialization failed: {e}")
 
-        # Elegant system status
-        st.markdown("### 📊 System Status")
+        # Compact system status
+        st.markdown("### 📊 Status")
 
         col1, col2 = st.columns(2)
 
         with col1:
             if is_engine_ready:
                 st.markdown("**AI Engine**")
-                st.markdown('<div class="elegant-status status-online">● Online</div>', unsafe_allow_html=True)
+                st.markdown('<div class="status-indicator status-online">● Online</div>', unsafe_allow_html=True)
             else:
                 st.markdown("**AI Engine**")
-                st.markdown('<div class="elegant-status status-offline">● Offline</div>', unsafe_allow_html=True)
+                st.markdown('<div class="status-indicator status-offline">● Offline</div>', unsafe_allow_html=True)
 
         with col2:
             if config and config.get('_CONFIG_VALID'):
-                st.markdown("**Configuration**")
-                st.markdown('<div class="elegant-status status-online">● Valid</div>', unsafe_allow_html=True)
+                st.markdown("**Config**")
+                st.markdown('<div class="status-indicator status-online">● Valid</div>', unsafe_allow_html=True)
             else:
-                st.markdown("**Configuration**")
-                st.markdown('<div class="elegant-status status-offline">● Invalid</div>', unsafe_allow_html=True)
+                st.markdown("**Config**")
+                st.markdown('<div class="status-indicator status-offline">● Invalid</div>', unsafe_allow_html=True)
 
-        # Elegant knowledge base metrics
+        # Compact knowledge base metrics
         if is_engine_ready and config:
             st.markdown("### 📊 Knowledge Base")
 
-            # Check Neo4j with elegant error handling
+            # Check Neo4j
             try:
                 driver = neo4j.GraphDatabase.driver(
                     config['NEO4J_URI'],
@@ -500,29 +466,29 @@ with st.sidebar:
             except Exception as e:
                 logger.warning(f"Neo4j check failed: {e}")
 
-            # Elegant metrics display
+            # Compact metrics display
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown(f"""
-                <div class="elegant-metric-card">
-                    <div class="elegant-metric-value">{neo4j_count:,}</div>
-                    <div class="elegant-metric-label">Entities</div>
+                <div class="compact-metric">
+                    <div class="compact-metric-value">{neo4j_count:,}</div>
+                    <div class="compact-metric-label">Entities</div>
                 </div>
                 """, unsafe_allow_html=True)
 
             with col2:
                 st.markdown(f"""
-                <div class="elegant-metric-card">
-                    <div class="elegant-metric-value">9</div>
-                    <div class="elegant-metric-label">Documents</div>
+                <div class="compact-metric">
+                    <div class="compact-metric-value">9</div>
+                    <div class="compact-metric-label">Documents</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Elegant health indicator
+            # Health indicator
             if neo4j_count > 0:
-                st.success("✅ **Knowledge base operational**")
+                st.success("✅ Knowledge base operational")
             else:
-                st.error("❌ **No data found**")
+                st.error("❌ No data found")
 
     else:
         st.error("❌ Core modules not available")
@@ -531,30 +497,30 @@ with st.sidebar:
     if "messages" not in st.session_state:
         st.session_state.messages = load_chat_history()
 
-    # Elegant session analytics
+    # Compact session analytics
     if st.session_state.messages:
-        st.markdown("### 📈 Session Analytics")
+        st.markdown("### 📈 Session")
         total_messages = len(st.session_state.messages)
         user_messages = len([m for m in st.session_state.messages if m["role"] == "user"])
 
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"""
-            <div class="elegant-metric-card">
-                <div class="elegant-metric-value">{total_messages}</div>
-                <div class="elegant-metric-label">Messages</div>
+            <div class="compact-metric">
+                <div class="compact-metric-value">{total_messages}</div>
+                <div class="compact-metric-label">Messages</div>
             </div>
             """, unsafe_allow_html=True)
 
         with col2:
             st.markdown(f"""
-            <div class="elegant-metric-card">
-                <div class="elegant-metric-value">{user_messages}</div>
-                <div class="elegant-metric-label">Queries</div>
+            <div class="compact-metric">
+                <div class="compact-metric-value">{user_messages}</div>
+                <div class="compact-metric-label">Queries</div>
             </div>
             """, unsafe_allow_html=True)
 
-    # Elegant system controls
+    # Compact controls
     st.markdown("### 🔧 Controls")
 
     if st.button("🗑️ Clear History", use_container_width=True):
@@ -571,7 +537,7 @@ with st.sidebar:
 # MAIN CHAT INTERFACE
 # ============================================================================
 
-# Elegant performance indicator for last response
+# Performance indicator for last response (more subtle)
 if st.session_state.messages:
     last_msg = st.session_state.messages[-1]
     if last_msg.get("role") == "assistant" and "response_time" in last_msg:
@@ -579,19 +545,19 @@ if st.session_state.messages:
         emoji, status, css_class = get_performance_indicator(duration)
 
         st.markdown(f"""
-        <div style="text-align: center; margin: 1.5rem auto; max-width: 300px;">
+        <div style="text-align: center; margin-bottom: 1rem;">
             <div class="performance-indicator {css_class}">
-                {emoji} Performance: {status} ({duration:.1f}s)
+                {emoji} {status} ({duration:.1f}s)
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-# Display chat messages with elegant styling
+# Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Elegant chat input
+# Enhanced chat input
 if IMPORTS_SUCCESSFUL and is_engine_ready:
     if neo4j_count > 0:
         placeholder = "💼 Ask me about your business documents and data..."
@@ -600,7 +566,7 @@ if IMPORTS_SUCCESSFUL and is_engine_ready:
 else:
     placeholder = "🔧 System initializing - please wait..."
 
-# Main chat input with enhanced functionality
+# Main chat input
 if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_engine_ready)):
     # Add user message
     user_message = {
@@ -615,7 +581,7 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
     with st.chat_message("user"):
         st.write(prompt)
 
-    # Handle greetings with elegance
+    # Handle greetings
     normalized_prompt = prompt.strip().lower()
     greetings = {
         "hi": "👋 Hello! I'm your Knowledge Assistant, ready to help you analyze your business documents.",
@@ -673,7 +639,7 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
                     st.session_state.messages.append(assistant_message)
                     save_chat_history(st.session_state.messages)
 
-                    # Elegant success feedback
+                    # Success feedback
                     emoji, status, _ = get_performance_indicator(duration)
                     st.success(f"{emoji} Analysis completed in {duration:.2f}s - {status} performance")
 
