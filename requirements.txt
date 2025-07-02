@@ -75,3 +75,13 @@ jsonschema>=4.22.0            # JSON schema validation
 # Security & Logging
 cryptography>=42.0.0          # Encryption
 loguru>=0.7.0                 # Enhanced logging
+
+# FastAPI and API server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6          # For file uploads
+websockets>=12.0                  # For WebSocket support
+
+# Rate limiting and caching
+slowapi>=0.1.9                   # For API rate limiting
+redis>=5.0.0                     # For caching and sessions

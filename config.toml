@@ -1,59 +1,397 @@
+# config.toml - LLM OCR ONLY CONFIGURATION
+# Centralized configuration with security fixes and EasyOCR removed
+
 [llm]
-#    model = "gpt-4-turbo"  # Example for OpenAI
-#    api_key = "" # Example for OpenAI (use env var preferably)
-#    base_url = "https://api.openai.com/v1/chat/completions" # Example for OpenAI
-    model = "gemini-1.5-flash-latest" # Example for Gemini
-    api_key = "" # Example for Gemini (use env var preferably)
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models" # Example for Gemini
-    parameters = {}
+    # PRIMARY LLM CONFIGURATION - Used for all LLM operations unless overridden
+    model = "gemini-1.5-flash-latest"
+    api_key = "your-google-api-key-here"
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 2000
+    temperature = 0.1
+
     [llm.ocr]
-    mistral_api_key = ""
+        # LLM OCR API KEYS - Multiple providers for redundancy
+        mistral_api_key = "your-mistral-api-key-here"
+        gemini_api_key = "your-google-api-key-here"
+        openai_api_key = "sk-your-openai-key-here"
+        anthropic_api_key = "sk-ant-your-anthropic-key-here"
 
-[llm.triple_extraction]
-#    model = "gpt-4-turbo"  # Example for OpenAI
-#    api_key = "" # Example for OpenAI (use env var preferably)
-#    base_url = "https://api.openai.com/v1/chat/completions" # Example for OpenAI
-    model = "gemini-1.5-flash-latest" # Example for Gemini
-    api_key = "" # Example for Gemini (use env var preferably)
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models" # Example for Gemini
-    triple_extraction_max_tokens = 2000
-    triple_extraction_temperature = 0.2
-    max_tokens = 2000 # Adjust as needed
-    temperature = 0.1 # Lower temperature for structured output
+        # LLM OCR Configuration - ACTIVELY USED by enhanced_ocr_pipeline.py
+        primary_method = "gemini"
+        fallback_enabled = true
+        confidence_threshold = 0.7
+        timeout_seconds = 60
+        max_retries = 2
 
+        [llm.ocr.gemini]
+            model = "gemini-1.5-flash"
+            max_tokens = 4000
+            temperature = 0.1
+
+        [llm.ocr.openai]
+            model = "gpt-4o"
+            max_tokens = 4000
+            temperature = 0.1
+
+        [llm.ocr.claude]
+            model = "claude-3-5-sonnet-20241022"
+            max_tokens = 4000
+            temperature = 0.1
+
+        [llm.ocr.mistral]
+            model = "pixtral-12b-2409"
+            max_tokens = 4000
+            temperature = 0.1
+
+[triple_extraction]
+    # ACTIVELY USED by processing_pipeline.py and entity_standardization.py
+    model = "gemini-1.5-flash-latest"
+    api_key = "your-google-api-key-here"
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    max_tokens = 2000
+    temperature = 0.1
+
+[relationship_inference]
+    # ACTIVELY USED by entity_standardization.py
+    enabled = true
+    model = "gemini-1.5-flash-latest"
+    api_key = "your-google-api-key-here"
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    max_tokens = 1500
+    temperature = 0.1
+
+[within_community_inference]
+    # ACTIVELY USED by entity_standardization.py
+    enabled = true
+    model = "gemini-1.5-flash-latest"
+    api_key = "your-google-api-key-here"
+    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    max_tokens = 1000
+    temperature = 0.1
+
+[inference]
+    # ACTIVELY USED by entity_standardization.py
+    enabled = true
+    llm_max_community_pairs = 5
+    llm_communities_to_consider = 3
+    llm_within_communities_to_process = 2
+    llm_max_pairs_per_community = 5
+
+[neo4j]
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and neo4j_exporter.py
+    uri = "bolt://localhost:7687"
+    user = "neo4j"
+    password = "mivaa1234"
+    database = "neo4j"
+
+[vector_db]
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and vector_embedding_storage.py
+    persist_directory = "./chroma_db_pipeline"
+    collection_name = "doc_pipeline_embeddings"
 
 [embeddings]
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py
     model_name = "all-MiniLM-L6-v2"
 
 [chunking]
+    # ACTIVELY USED by processing_pipeline.py
     chunk_size = 1000
     overlap = 100
 
 [standardization]
+    # ACTIVELY USED by entity_standardization.py
     enabled = true
+    debug_logging = false
+    max_merge_attempts = 100
+    similarity_threshold = 0.8
+    cross_type_merging = true
+    log_rejected_merges = false
+    log_level = "WARNING"
+
     [standardization.synonyms]
-    # Format: "lowercase_variant" = "Canonical Name"
-    "schlumberger" = "SLB"
-    "slb global technology center" = "SLB"
-    "schlumberger information solutions" = "SLB"
-    "university of california, berkeley" = "UC Berkeley"
-    "reliance" = "Reliance Industries Limited" # Example
-    "ril" = "Reliance Industries Limited" # Example
-    "ongc" = "ONGC" # Ensure canonical casing if desired
-    "gspc" = "GSPC"
-    # Add other known aliases here
+    # ACTIVELY USED by entity_standardization.py for synonym mapping
+    "wo" = "Work Order"
+    "work order" = "Work Order"
+    "work-order" = "Work Order"
+    "maintenance order" = "Work Order"
+    "service order" = "Work Order"
+    "repair order" = "Work Order"
 
-[inference]
-    enabled = true
-    max_tokens = 2000
+    # EQUIPMENT STANDARDIZATION
+    "compressor" = "Compressor Unit"
+    "pump" = "Pump Unit"
+    "motor" = "Motor Unit"
+    "generator" = "Generator Unit"
+    "turbine" = "Turbine Unit"
+    "valve" = "Valve Unit"
+    "tank" = "Storage Tank"
+    "vessel" = "Pressure Vessel"
 
-[visualization]
-    edge_smooth = false
+    # FACILITY & LOCATION TERMS
+    "bldg" = "Building"
+    "bldg." = "Building"
+    "building" = "Building"
+    "facility" = "Facility"
+    "plant" = "Plant"
+    "site" = "Site"
+    "location" = "Location"
+    "area" = "Area"
+    "zone" = "Zone"
+    "section" = "Section"
+    "unit" = "Unit"
 
-[caching]
-    enabled = true
+    # MAINTENANCE TYPES
+    "pm" = "Preventive Maintenance"
+    "preventive maintenance" = "Preventive Maintenance"
+    "preventative maintenance" = "Preventive Maintenance"
+    "corrective maintenance" = "Corrective Maintenance"
+    "emergency repair" = "Emergency Maintenance"
+    "breakdown maintenance" = "Emergency Maintenance"
+    "scheduled maintenance" = "Preventive Maintenance"
+    "routine maintenance" = "Preventive Maintenance"
+
+    # TECHNICAL TERMS
+    "hp" = "Horsepower"
+    "horsepower" = "Horsepower"
+    "rpm" = "RPM"
+    "psi" = "PSI"
+    "gpm" = "GPM"
+    "cfm" = "CFM"
+    "kwh" = "kWh"
+    "kilowatt hour" = "kWh"
+    "kilowatt-hour" = "kWh"
+
+    # STATUS TERMS
+    "complete" = "Complete"
+    "completed" = "Complete"
+    "finished" = "Complete"
+    "done" = "Complete"
+    "in progress" = "In Progress"
+    "in-progress" = "In Progress"
+    "pending" = "Pending"
+    "open" = "Open"
+    "closed" = "Closed"
+    "cancelled" = "Cancelled"
+    "canceled" = "Cancelled"
+
+    # PARTS & MATERIALS
+    "bearing" = "Bearing"
+    "seal" = "Seal"
+    "gasket" = "Gasket"
+    "o-ring" = "O-Ring"
+    "o ring" = "O-Ring"
+    "filter" = "Filter"
+    "belt" = "Belt"
+    "coupling" = "Coupling"
+    "impeller" = "Impeller"
+    "rotor" = "Rotor"
+    "stator" = "Stator"
+
+    # PERSONNEL TITLES
+    "tech" = "Technician"
+    "technician" = "Technician"
+    "mechanic" = "Technician"
+    "engineer" = "Engineer"
+    "supervisor" = "Supervisor"
+    "foreman" = "Supervisor"
+    "manager" = "Manager"
+    "operator" = "Operator"
+
+    # INVOICE & FINANCIAL TERMS
+    "inv" = "Invoice"
+    "invoice" = "Invoice"
+    "bill" = "Invoice"
+    "receipt" = "Receipt"
+    "po" = "Purchase Order"
+    "purchase order" = "Purchase Order"
+    "p.o." = "Purchase Order"
+    "afe" = "AFE Number"
+    "afe number" = "AFE Number"
+    "cost center" = "Cost Center"
+    "gl code" = "GL Code"
+    "account code" = "GL Code"
+
+    # DOCUMENT TYPES
+    "report" = "Report"
+    "checklist" = "Checklist"
+    "inspection" = "Inspection Report"
+    "test report" = "Test Report"
+    "certificate" = "Certificate"
+    "permit" = "Permit"
+    "procedure" = "Procedure"
+    "manual" = "Manual"
+
+    # TIME & SCHEDULING
+    "hrs" = "Hours"
+    "hours" = "Hours"
+    "hr" = "Hours"
+    "mins" = "Minutes"
+    "minutes" = "Minutes"
+    "min" = "Minutes"
+    "shift" = "Shift"
+    "day shift" = "Day Shift"
+    "night shift" = "Night Shift"
+    "weekend" = "Weekend"
+    "overtime" = "Overtime"
+
+    # SAFETY & COMPLIANCE
+    "safety" = "Safety"
+    "hazard" = "Hazard"
+    "risk" = "Risk"
+    "lockout" = "Lockout/Tagout"
+    "loto" = "Lockout/Tagout"
+    "permit to work" = "Work Permit"
+    "work permit" = "Work Permit"
+    "confined space" = "Confined Space"
+    "hot work" = "Hot Work"
+
+    # MEASUREMENTS & UNITS
+    "ft" = "Feet"
+    "feet" = "Feet"
+    "in" = "Inches"
+    "inches" = "Inches"
+    "mm" = "Millimeters"
+    "cm" = "Centimeters"
+    "m" = "Meters"
+    "kg" = "Kilograms"
+    "lbs" = "Pounds"
+    "pounds" = "Pounds"
+    "tons" = "Tons"
+    "gallons" = "Gallons"
+    "gal" = "Gallons"
+    "liters" = "Liters"
+    "l" = "Liters"
 
 [nlp]
-    COREFERENCE_RESOLUTION_ENABLED = true  # Master switch
-    SPACY_MODEL_NAME = "en_core_web_trf"  # Or your chosen spaCy model
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and processing_pipeline.py
+    coreference_resolution_enabled = false
+    spacy_model_name = "en_core_web_trf"
+
+[performance]
+    # ACTIVELY USED by processing_pipeline.py
+    max_workers = 2
+    batch_size = 1
+    memory_limit_mb = 4096
+    enable_caching = true
+    cache_ttl_hours = 24
+
+[logging]
+    # ACTIVELY USED by multiple modules for logging configuration
+    level = "INFO"
+    mask_api_keys = true
+    mask_passwords = true
+    ocr_level = "INFO"
+    entity_standardization_level = "WARNING"
+    neo4j_level = "INFO"
+
+    [logging.loggers]
+    "src.knowledge_graph.entity_standardization" = "WARNING"
+    "src.utils.ocr_storage" = "INFO"
+
+[mistral]
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py for backward compatibility
+    api_key = "your-mistral-api-key-here"
+    model = "pixtral-12b-2409"
+    timeout = 30
+
+[caching]
+    # ACTIVELY USED by processing_pipeline.py
+    enabled = true
+    cache_ttl_hours = 24
+
+[pipeline]
+    # ACTIVELY USED by processing_pipeline.py
+    standardization_enabled = true
+    inference_enabled = true
+    cache_enabled = true
+    text_sanitization_enabled = true
+    text_sanitization_mode = "strict"
+    max_file_size_mb = 50
+    max_processing_time_minutes = 30
+    concurrent_file_limit = 1
+
+[database]
+    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py
+    name = "neo4j"
+
+# ENHANCED METADATA CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py
+[metadata]
+    extract_entities = true
+    classify_documents = true
+    analyze_quality = true
+    create_chunks = true
+    chunk_size = 1000
+    extract_companies = true
+    extract_people = true
+    extract_locations = true
+    extract_dates = true
+    extract_money = true
+    extract_equipment = true
+    enable_document_type_detection = true
+    enable_category_classification = true
+    classification_confidence_threshold = 0.5
+    enable_readability_scoring = true
+    enable_complexity_analysis = true
+    enable_issue_detection = true
+
+# FILE PROCESSING CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py
+[file_processing]
+    supported_types = ["application/pdf", "image/png", "image/jpeg", "image/jpg", "text/plain", "text/csv", "text/html", "text/xml"]
+    pdf_dpi = 200
+    pdf_max_pages = 10
+    enhance_images = true
+    image_contrast_boost = 1.2
+    image_sharpness_boost = 1.1
+    handle_text_files_directly = true
+    text_encoding_fallback = ["utf-8", "latin-1", "cp1252", "ascii"]
+
+# STORAGE CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py and ocr_storage.py
+[storage]
+    enable_ocr_storage = true
+    storage_directory = "./ocr_outputs"
+    save_metadata = true
+    save_chunks = true
+    enable_csv_export = true
+    enable_excel_export = true
+    enable_json_export = true
+    enable_zip_export = true
+
+[universal]
+    # Universal Industry Support
+    enable_universal_patterns = true
+
+    # Manual industry override (optional)
+    # Options: oil_gas, manufacturing, healthcare, logistics, utilities, construction, generic
+    # Leave empty for auto-detection
+    manual_industry = ""
+
+    # Industry detection settings
+    auto_detect_industry = true
+    confidence_threshold = 0.6
+
+    # Pattern adaptation settings
+    adapt_to_schema = true
+    use_domain_keywords = true
+    learn_from_data = true
+
+[query_engine]
+    # Enhanced Cypher Generation Settings (if not already present)
+    enable_advanced_cypher = true
+    pattern_confidence_threshold = 0.6
+    hybrid_mode = true
+    entity_linking_fuzzy_threshold = 70
+    enable_query_caching = true
+    max_cypher_retries = 2
+
+[pattern_library]
+    # Universal pattern settings
+    use_universal_patterns = true
+    fallback_to_base_patterns = true
+    pattern_confidence_threshold = 0.5
+    max_patterns_per_category = 3
+
+[analytics]
+    # Performance Tracking (if not already present)
+    track_generation_stats = true
+    store_successful_patterns = true
+    enable_few_shot_learning = true

@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # GraphRAG API Service
+  graphrag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: graphrag-api
+    ports:
+      - "8000:8000"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-graphrag123}
+      - REDIS_URL=redis://redis:6379
+      - VALID_API_KEYS=${API_KEYS:-dev-key-12345}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./chroma_db_pipeline:/app/chroma_db_pipeline
+      - ./ocr_outputs:/app/ocr_outputs
+      - ./config.toml:/app/config.toml:ro
+    depends_on:
+      - neo4j
+      - redis
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # GraphRAG Streamlit UI Service
+  graphrag-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: graphrag-ui
+    ports:
+      - "8501:8501"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-graphrag123}
+      - STREAMLIT_LOGGER_LEVEL=debug
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./chroma_db_pipeline:/app/chroma_db_pipeline
+      - ./ocr_outputs:/app/ocr_outputs
+      - ./config.toml:/app/config.toml:ro
+    depends_on:
+      - neo4j
+      - redis
+    command: ["streamlit", "run", "GraphRAG_Document_AI_Platform.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Neo4j Database - FIXED CONFIGURATION
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: graphrag-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-graphrag123}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-graphrag123}", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Redis for caching and job queues
+  redis:
+    image: redis:7-alpine
+    container_name: graphrag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_plugins:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  graphrag-network:
+    driver: bridge

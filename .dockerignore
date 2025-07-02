@@ -1,0 +1,71 @@
+# .dockerignore - Exclude files from Docker build context
+
+# Python cache and builds
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Project specific runtime files
+logs/
+*.log
+temp/
+tmp/
+.streamlit/
+chat_history.json
+graph_visualization.html
+
+# Data directories (empty them for Docker)
+data/*
+!data/.gitkeep
+chroma_db_pipeline/*
+!chroma_db_pipeline/.gitkeep
+ocr_outputs/*
+!ocr_outputs/.gitkeep
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+*.md
