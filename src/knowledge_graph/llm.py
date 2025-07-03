@@ -89,17 +89,21 @@ class BaseLLMProvider(ABC):
 
     def call_llm(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         """Generic LLM call implementation."""
-        # Override config with kwargs
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
-        timeout = kwargs.get('timeout', self.config.timeout)
+        # Create a clean copy of kwargs to avoid parameter conflicts
+        clean_kwargs = kwargs.copy()
+
+        # Override config with kwargs (remove from clean_kwargs to avoid conflicts)
+        max_tokens = clean_kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = clean_kwargs.pop('temperature', self.config.temperature)
+        timeout = clean_kwargs.pop('timeout', self.config.timeout)
+
+        # Add back the parameters we want to pass to _prepare_request
+        clean_kwargs['max_tokens'] = max_tokens
+        clean_kwargs['temperature'] = temperature
 
         # Prepare request
         url, headers, payload = self._prepare_request(
-            user_prompt, system_prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            **kwargs
+            user_prompt, system_prompt, **clean_kwargs
         )
 
         # Make request
@@ -145,8 +149,9 @@ class GeminiProvider(BaseLLMProvider):
     """Google Gemini provider implementation."""
 
     def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
+        # Use pop to avoid parameter conflicts
+        max_tokens = kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = kwargs.pop('temperature', self.config.temperature)
 
         url = f"{self.config.base_url}/{self.config.model}:generateContent?key={self.config.api_key}"
 
@@ -195,8 +200,9 @@ class OpenAIProvider(BaseLLMProvider):
     """OpenAI provider implementation."""
 
     def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
+        # Use pop to avoid parameter conflicts
+        max_tokens = kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = kwargs.pop('temperature', self.config.temperature)
 
         url = self.config.base_url
 
@@ -240,8 +246,9 @@ class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude provider implementation."""
 
     def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
+        # Use pop to avoid parameter conflicts
+        max_tokens = kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = kwargs.pop('temperature', self.config.temperature)
 
         url = self.config.base_url
 
@@ -285,8 +292,9 @@ class MistralProvider(BaseLLMProvider):
     """Mistral AI provider implementation."""
 
     def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
+        # Use pop to avoid parameter conflicts
+        max_tokens = kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = kwargs.pop('temperature', self.config.temperature)
 
         url = self.config.base_url
 
@@ -330,8 +338,9 @@ class OllamaProvider(BaseLLMProvider):
     """Ollama local provider implementation."""
 
     def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
-        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
-        temperature = kwargs.get('temperature', self.config.temperature)
+        # Use pop to avoid parameter conflicts
+        max_tokens = kwargs.pop('max_tokens', self.config.max_tokens)
+        temperature = kwargs.pop('temperature', self.config.temperature)
 
         url = self.config.base_url
 
@@ -589,6 +598,7 @@ def fix_malformed_json(text: str) -> str:
     text = re.sub(r'"([^"]*)$', r'"\1"', text)
     return text.strip()
 
+
 def extract_json_from_text(text):
     """
     Extract JSON array from text that might contain extra content, noise, or markdown.
@@ -607,14 +617,14 @@ def extract_json_from_text(text):
         logger.warning("extract_json_from_text received empty or non-string input.")
         return None
 
-    logger.debug(f"Attempting to extract JSON from text starting with: {text[:100]}...") # Log beginning of text
+    logger.debug(f"Attempting to extract JSON from text starting with: {text[:100]}...")  # Log beginning of text
 
     # Auto-fix: Replace curly quotes with straight quotes
-    text = text.replace("“", "\"").replace("”", "\"")
+    text = text.replace(""", "\"").replace(""", "\"")
 
     # Auto-fix: Remove any unexpected trailing backticks or markdown formatting
-    text = re.sub(r'^```(?:json)?\s*', '', text) # Remove starting ```json or ```
-    text = re.sub(r'\s*```$', '', text) # Remove ending ```
+    text = re.sub(r'^```(?:json)?\s*', '', text)  # Remove starting ```json or ```
+    text = re.sub(r'\s*```$', '', text)  # Remove ending ```
 
     # Find the start of the first JSON array or object
     start_bracket = text.find('[')
@@ -648,10 +658,10 @@ def extract_json_from_text(text):
             bracket_count -= 1
             if bracket_count == 0:
                 end_idx = i
-                break # Found the matching end
+                break  # Found the matching end
 
     if end_idx != -1:
-        json_str = text[start_idx : end_idx + 1]
+        json_str = text[start_idx: end_idx + 1]
         logger.debug(f"Extracted potential JSON string: {json_str[:100]}...")
         try:
             # Basic cleaning before parsing
@@ -692,8 +702,8 @@ def extract_json_from_text(text):
                     logger.debug(f"Reconstructed JSON string: {reconstructed_json_str}")
                     return None
             else:
-                 logger.error("Recovery failed: No valid JSON objects found within the text.")
-                 return None
+                logger.error("Recovery failed: No valid JSON objects found within the text.")
+                return None
         else:
-             logger.error("Could not extract a complete JSON structure.")
-             return None
+            logger.error("Could not extract a complete JSON structure.")
+            return None

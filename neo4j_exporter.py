@@ -1197,7 +1197,7 @@ class Neo4jExporter:
 
         logger.info("Calculating enhanced graph statistics...")
         query = """
-        CALL { MATCH (n:Entity) RETURN count(n) AS entity_count }
+        CALL () { MATCH (n:Entity) RETURN count(n) AS entity_count }
         CALL { MATCH (n:Document) RETURN count(n) AS document_count }
         CALL { MATCH (n:Chunk) RETURN count(n) AS chunk_count }
         CALL { MATCH ()-[r]->() RETURN count(r) AS relationship_count }

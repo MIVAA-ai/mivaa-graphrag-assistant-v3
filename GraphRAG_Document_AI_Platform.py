@@ -880,16 +880,15 @@ def show_llm_provider_status(config):
                 st.warning(f"⚠️ {fallback_provider.title()} (Not Available)")
 
         with col3:
-            st.markdown("**Available Providers**")
-            st.info(f"🎯 {len(available_providers)} providers ready")
-
-        # Show detailed provider status
-        if st.expander("📋 Detailed Provider Status", expanded=False):
+            st.markdown("**Ready Providers**")
+            # Count actually ready providers (enabled + has API key)
             providers_config = config.get('llm', {}).get('providers', {})
+            ready_count = 0
 
             for provider_name, provider_config in providers_config.items():
                 enabled = provider_config.get('enabled', False)
-                model = provider_config.get('model', 'Unknown')
+                if not enabled:
+                    continue
 
                 # Check if API key is available
                 api_key_available = False
@@ -904,12 +903,73 @@ def show_llm_provider_status(config):
                 elif provider_name == 'ollama':
                     api_key_available = True  # Local model
 
-                status_icon = "✅" if (enabled and api_key_available) else "❌"
-                st.markdown(
-                    f"{status_icon} **{provider_name.title()}**: {model} {'(Enabled)' if enabled else '(Disabled)'}")
+                if enabled and api_key_available:
+                    ready_count += 1
 
-                if enabled and not api_key_available:
-                    st.warning(f"⚠️ API key missing for {provider_name}")
+            if ready_count > 0:
+                st.success(f"✅ {ready_count} ready")
+            else:
+                st.error("❌ None ready")
+
+        # Show detailed provider status - Only if there are issues or user wants details
+        providers_config = config.get('llm', {}).get('providers', {})
+        has_issues = False
+
+        for provider_name, provider_config in providers_config.items():
+            enabled = provider_config.get('enabled', False)
+            if not enabled:
+                continue
+
+            # Check if API key is available
+            api_key_available = False
+            if provider_name == 'gemini':
+                api_key_available = bool(os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY'))
+            elif provider_name == 'openai':
+                api_key_available = bool(os.getenv('OPENAI_API_KEY'))
+            elif provider_name == 'anthropic':
+                api_key_available = bool(os.getenv('ANTHROPIC_API_KEY'))
+            elif provider_name == 'mistral':
+                api_key_available = bool(os.getenv('MISTRAL_API_KEY'))
+            elif provider_name == 'ollama':
+                api_key_available = True  # Local model
+
+            if enabled and not api_key_available:
+                has_issues = True
+                break
+
+        # Show provider availability status
+        if has_issues:
+            if st.expander("📋 Additional Provider Support", expanded=False):
+                st.info(
+                    "💡 **Your application is working with the available API keys.** Additional LLM providers are supported but not currently configured:")
+
+                for provider_name, provider_config in providers_config.items():
+                    enabled = provider_config.get('enabled', False)
+                    if not enabled:
+                        continue
+
+                    model = provider_config.get('model', 'Unknown')
+
+                    # Check if API key is available
+                    api_key_available = False
+                    if provider_name == 'gemini':
+                        api_key_available = bool(os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY'))
+                    elif provider_name == 'openai':
+                        api_key_available = bool(os.getenv('OPENAI_API_KEY'))
+                    elif provider_name == 'anthropic':
+                        api_key_available = bool(os.getenv('ANTHROPIC_API_KEY'))
+                    elif provider_name == 'mistral':
+                        api_key_available = bool(os.getenv('MISTRAL_API_KEY'))
+                    elif provider_name == 'ollama':
+                        api_key_available = True  # Local model
+
+                    if enabled and api_key_available:
+                        st.success(f"✅ **{provider_name.title()}** ({model}): Active")
+                    elif enabled and not api_key_available:
+                        st.info(f"📋 **{provider_name.title()}** ({model}): Available (add API key to enable)")
+        else:
+            # Show a confirmation that everything is working
+            st.success("✅ All configured providers are active and ready")
 
         return True
 
@@ -917,7 +977,6 @@ def show_llm_provider_status(config):
         logger.error(f"Error showing LLM provider status: {e}")
         st.error(f"❌ Could not load LLM provider status: {e}")
         return False
-
 
 def process_documents_batch(uploaded_files, enhanced_ocr_pipeline, save_to_disk=True):
     """
