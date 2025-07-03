@@ -1,79 +1,157 @@
 #!/usr/bin/env python3
 """
-LLM interaction utilities for knowledge graph generation.
-Handles LLM API calls and JSON extraction from messy LLM responses.
-Supports OpenAI, Mistral AI, Google Gemini, and Ollama compatible endpoints.
+Enhanced LLM interaction utilities with provider abstraction.
+Supports OpenAI, Mistral AI, Google Gemini, Anthropic Claude, and Ollama.
+Provider-agnostic interface with configuration-driven provider selection.
 """
 
 import requests
 import json
 import re
 import logging
-import time # Import time for potential delays
-from typing import Optional
+import time
+import os
+from typing import Optional, Dict, Any, List, Union
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# --- ADDED: Custom Exception for Quota Errors ---
+
+# --- Custom Exceptions ---
 class QuotaError(Exception):
     """Custom exception for API quota/rate limit errors."""
     pass
 
-# --- MODIFIED call_llm function ---
-def call_llm(
-    model: str,
-    user_prompt: str,
-    api_key: str,
-    system_prompt: Optional[str] = None,
-    max_tokens: int = 1000,
-    temperature: float = 0.2,
-    base_url: Optional[str] = None,
-    session: Optional[requests.Session] = None # ADDED: Optional session argument
-) -> str:
-    """
-    Generic LLM API caller supporting OpenAI, Mistral, Google Gemini, and Ollama.
-    Uses a provided requests.Session for connection pooling if available.
-    Raises QuotaError for HTTP 429 status codes.
 
-    Args:
-        model: Model name (e.g., "gpt-4-turbo", "mistral-large-latest", "gemini-1.5-pro-latest", "phi3:mini")
-        user_prompt: User prompt string
-        api_key: The API key (use "ollama" or any non-empty string for local Ollama)
-        system_prompt: Optional system context
-        max_tokens: Response length
-        temperature: LLM creativity level
-        base_url: API endpoint URL (e.g., "https://api.openai.com/v1/chat/completions",
-                  "https://api.mistral.ai/v1/chat/completions",
-                  "https://generativelanguage.googleapis.com/v1beta/models",
-                  "http://localhost:11434/v1/chat/completions")
-        session: An optional requests.Session object for making the request.
+class LLMProviderError(Exception):
+    """Custom exception for provider-specific errors."""
+    pass
 
-    Returns:
-        LLM Response Text
 
-    Raises:
-        ValueError: If base_url or api_key is missing.
-        QuotaError: If the API returns a 429 status code.
-        TimeoutError: If the request times out.
-        requests.exceptions.RequestException: For other request-related errors.
-        Exception: For general API errors or response parsing issues.
-    """
-    if not base_url:
-        raise ValueError("base_url must be provided")
-    if not api_key: # API key is required, even if just a placeholder for Ollama
-         raise ValueError("api_key must be provided (use 'ollama' or any string for local Ollama)")
+class LLMConfigurationError(Exception):
+    """Custom exception for configuration errors."""
+    pass
 
-    headers = {'Content-Type': 'application/json'}
-    is_gemini = "generativelanguage.googleapis.com" in base_url
-    is_ollama = "localhost" in base_url or "ollama" in base_url # Simple check for local Ollama
 
-    # Add Authorization Header only for non-Gemini, non-Ollama cloud APIs
-    if not is_gemini and not is_ollama:
-        headers['Authorization'] = f"Bearer {api_key}"
+# --- Provider Types ---
+class LLMProvider(Enum):
+    GEMINI = "gemini"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    MISTRAL = "mistral"
+    OLLAMA = "ollama"
 
-    # Construct payload based on API type
-    if is_gemini:
-        # Gemini specific payload structure
+
+@dataclass
+class LLMConfig:
+    """Configuration for an LLM provider."""
+    provider: LLMProvider
+    model: str
+    api_key: str
+    base_url: str
+    max_tokens: int = 2000
+    temperature: float = 0.1
+    timeout: int = 60
+    extra_params: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.extra_params is None:
+            self.extra_params = {}
+
+
+# --- Abstract Base Class for LLM Providers ---
+class BaseLLMProvider(ABC):
+    """Abstract base class for LLM providers."""
+
+    def __init__(self, config: LLMConfig):
+        self.config = config
+        self.session = None
+
+    def set_session(self, session: requests.Session):
+        """Set a requests session for connection pooling."""
+        self.session = session
+
+    @abstractmethod
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        """Prepare the request URL, headers, and payload for the provider."""
+        pass
+
+    @abstractmethod
+    def _parse_response(self, response_data: dict) -> str:
+        """Parse the provider-specific response format."""
+        pass
+
+    def call_llm(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+        """Generic LLM call implementation."""
+        # Override config with kwargs
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+        timeout = kwargs.get('timeout', self.config.timeout)
+
+        # Prepare request
+        url, headers, payload = self._prepare_request(
+            user_prompt, system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs
+        )
+
+        # Make request
+        requester = self.session if self.session else requests
+
+        try:
+            logger.debug(f"Sending request to {self.config.provider.value} at {url}")
+            response = requester.post(url, headers=headers, json=payload, timeout=timeout)
+
+            # Check for quota errors
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                error_msg = f"API Quota/Rate Limit Exceeded (HTTP 429) for {self.config.provider.value}"
+                if retry_after:
+                    error_msg += f". Retry after {retry_after} seconds."
+                logger.warning(error_msg)
+                raise QuotaError(error_msg)
+
+            response.raise_for_status()
+
+            # Parse response
+            response_data = response.json()
+            return self._parse_response(response_data)
+
+        except requests.exceptions.Timeout:
+            error_msg = f"Request timeout ({timeout}s) for {self.config.provider.value}"
+            logger.error(error_msg)
+            raise TimeoutError(error_msg)
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error for {self.config.provider.value}: {e}"
+            logger.error(error_msg)
+            raise LLMProviderError(error_msg) from e
+
+        except Exception as e:
+            error_msg = f"Unexpected error for {self.config.provider.value}: {e}"
+            logger.error(error_msg)
+            raise LLMProviderError(error_msg) from e
+
+
+# --- Provider Implementations ---
+class GeminiProvider(BaseLLMProvider):
+    """Google Gemini provider implementation."""
+
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+
+        url = f"{self.config.base_url}/{self.config.model}:generateContent?key={self.config.api_key}"
+
+        headers = {'Content-Type': 'application/json'}
+
         payload = {
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "generationConfig": {
@@ -81,109 +159,434 @@ def call_llm(
                 "maxOutputTokens": max_tokens
             }
         }
-        if system_prompt:
-             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-        api_url = f"{base_url}/{model}:generateContent?key={api_key}"
 
-    else:
-        # OpenAI / Mistral / Ollama Style Payload
+        if system_prompt:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+
+        return url, headers, payload
+
+    def _parse_response(self, response_data: dict) -> str:
+        candidates = response_data.get("candidates", [])
+        if not candidates:
+            # Check for quota error in response body
+            if "error" in response_data and "exhausted" in response_data["error"].get("message", "").lower():
+                raise QuotaError(f"Gemini quota exhausted: {response_data['error']}")
+            logger.warning(f"No candidates in Gemini response: {response_data}")
+            return ""
+
+        candidate = candidates[0]
+
+        # Check for safety blocks
+        if candidate.get("finishReason") == "SAFETY":
+            logger.warning("Gemini response blocked by safety settings")
+            return "[ERROR: Response blocked by safety settings]"
+
+        content = candidate.get("content", {})
+        parts = content.get("parts", [])
+
+        if parts:
+            return parts[0].get("text", "")
+
+        logger.warning(f"Could not extract text from Gemini response: {response_data}")
+        return ""
+
+
+class OpenAIProvider(BaseLLMProvider):
+    """OpenAI provider implementation."""
+
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+
+        url = self.config.base_url
+
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.config.api_key}'
+        }
+
         messages = []
         if system_prompt:
             messages.append({'role': 'system', 'content': system_prompt})
         messages.append({'role': 'user', 'content': user_prompt})
+
         payload = {
-            "model": model,
+            "model": self.config.model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        api_url = base_url
 
-    requester = session if session else requests
-    response = None
-    request_timeout = 60 # Timeout in seconds
+        return url, headers, payload
 
+    def _parse_response(self, response_data: dict) -> str:
+        if "error" in response_data:
+            error_msg = response_data['error'].get("message", "").lower()
+            if "rate limit" in error_msg or "quota" in error_msg:
+                raise QuotaError(f"OpenAI quota/rate limit: {response_data['error']}")
+            else:
+                raise LLMProviderError(f"OpenAI API error: {response_data['error']}")
+
+        choices = response_data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            return message.get("content", "")
+
+        logger.warning(f"Could not extract content from OpenAI response: {response_data}")
+        return ""
+
+
+class AnthropicProvider(BaseLLMProvider):
+    """Anthropic Claude provider implementation."""
+
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+
+        url = self.config.base_url
+
+        headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': self.config.api_key,
+            'anthropic-version': '2023-06-01'
+        }
+
+        messages = [{"role": "user", "content": user_prompt}]
+
+        payload = {
+            "model": self.config.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": messages
+        }
+
+        if system_prompt:
+            payload["system"] = system_prompt
+
+        return url, headers, payload
+
+    def _parse_response(self, response_data: dict) -> str:
+        if "error" in response_data:
+            error_msg = response_data['error'].get("message", "").lower()
+            if "rate limit" in error_msg or "quota" in error_msg:
+                raise QuotaError(f"Anthropic quota/rate limit: {response_data['error']}")
+            else:
+                raise LLMProviderError(f"Anthropic API error: {response_data['error']}")
+
+        content = response_data.get("content", [])
+        if content and isinstance(content, list):
+            return content[0].get("text", "")
+
+        logger.warning(f"Could not extract content from Anthropic response: {response_data}")
+        return ""
+
+
+class MistralProvider(BaseLLMProvider):
+    """Mistral AI provider implementation."""
+
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+
+        url = self.config.base_url
+
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.config.api_key}'
+        }
+
+        messages = []
+        if system_prompt:
+            messages.append({'role': 'system', 'content': system_prompt})
+        messages.append({'role': 'user', 'content': user_prompt})
+
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        return url, headers, payload
+
+    def _parse_response(self, response_data: dict) -> str:
+        if "error" in response_data:
+            error_msg = response_data['error'].get("message", "").lower()
+            if "rate limit" in error_msg or "quota" in error_msg:
+                raise QuotaError(f"Mistral quota/rate limit: {response_data['error']}")
+            else:
+                raise LLMProviderError(f"Mistral API error: {response_data['error']}")
+
+        choices = response_data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            return message.get("content", "")
+
+        logger.warning(f"Could not extract content from Mistral response: {response_data}")
+        return ""
+
+
+class OllamaProvider(BaseLLMProvider):
+    """Ollama local provider implementation."""
+
+    def _prepare_request(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> tuple:
+        max_tokens = kwargs.get('max_tokens', self.config.max_tokens)
+        temperature = kwargs.get('temperature', self.config.temperature)
+
+        url = self.config.base_url
+
+        headers = {'Content-Type': 'application/json'}
+
+        messages = []
+        if system_prompt:
+            messages.append({'role': 'system', 'content': system_prompt})
+        messages.append({'role': 'user', 'content': user_prompt})
+
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+
+        return url, headers, payload
+
+    def _parse_response(self, response_data: dict) -> str:
+        choices = response_data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            return message.get("content", "")
+
+        logger.warning(f"Could not extract content from Ollama response: {response_data}")
+        return ""
+
+
+# --- Provider Factory ---
+class LLMProviderFactory:
+    """Factory for creating LLM provider instances."""
+
+    _providers = {
+        LLMProvider.GEMINI: GeminiProvider,
+        LLMProvider.OPENAI: OpenAIProvider,
+        LLMProvider.ANTHROPIC: AnthropicProvider,
+        LLMProvider.MISTRAL: MistralProvider,
+        LLMProvider.OLLAMA: OllamaProvider,
+    }
+
+    @classmethod
+    def create_provider(cls, config: LLMConfig) -> BaseLLMProvider:
+        """Create a provider instance from configuration."""
+        provider_class = cls._providers.get(config.provider)
+        if not provider_class:
+            raise LLMConfigurationError(f"Unknown provider: {config.provider}")
+
+        return provider_class(config)
+
+    @classmethod
+    def create_from_dict(cls, config_dict: Dict[str, Any]) -> BaseLLMProvider:
+        """Create a provider from a dictionary configuration."""
+        provider_name = config_dict.get('provider')
+        if not provider_name:
+            raise LLMConfigurationError("Provider name not specified in configuration")
+
+        try:
+            provider_enum = LLMProvider(provider_name.lower())
+        except ValueError:
+            raise LLMConfigurationError(f"Invalid provider name: {provider_name}")
+
+        # Get API key from environment or config
+        api_key = config_dict.get('api_key')
+        if not api_key:
+            # Try to get from environment based on provider
+            env_key_map = {
+                LLMProvider.GEMINI: ['GOOGLE_API_KEY', 'GEMINI_API_KEY'],
+                LLMProvider.OPENAI: ['OPENAI_API_KEY'],
+                LLMProvider.ANTHROPIC: ['ANTHROPIC_API_KEY'],
+                LLMProvider.MISTRAL: ['MISTRAL_API_KEY'],
+                LLMProvider.OLLAMA: ['OLLAMA_API_KEY'],  # May not be needed
+            }
+
+            for env_var in env_key_map.get(provider_enum, []):
+                api_key = os.getenv(env_var)
+                if api_key:
+                    break
+
+        if not api_key and provider_enum != LLMProvider.OLLAMA:
+            raise LLMConfigurationError(f"API key not found for provider {provider_name}")
+
+        config = LLMConfig(
+            provider=provider_enum,
+            model=config_dict.get('model', 'default'),
+            api_key=api_key or 'local',  # For Ollama
+            base_url=config_dict.get('base_url', ''),
+            max_tokens=config_dict.get('max_tokens', 2000),
+            temperature=config_dict.get('temperature', 0.1),
+            timeout=config_dict.get('timeout', 60),
+            extra_params=config_dict.get('extra_params', {})
+        )
+
+        return cls.create_provider(config)
+
+
+# --- Enhanced LLM Manager ---
+class LLMManager:
+    """Manager for handling multiple LLM providers with fallback support."""
+
+    def __init__(self, primary_provider: BaseLLMProvider, fallback_providers: List[BaseLLMProvider] = None):
+        self.primary_provider = primary_provider
+        self.fallback_providers = fallback_providers or []
+        self.session = None
+
+    def set_session(self, session: requests.Session):
+        """Set requests session for all providers."""
+        self.session = session
+        self.primary_provider.set_session(session)
+        for provider in self.fallback_providers:
+            provider.set_session(session)
+
+    def call_llm(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+        """Call LLM with fallback support."""
+        providers = [self.primary_provider] + self.fallback_providers
+
+        last_error = None
+        for i, provider in enumerate(providers):
+            try:
+                logger.debug(f"Attempting LLM call with {provider.config.provider.value} (attempt {i + 1})")
+                result = provider.call_llm(user_prompt, system_prompt, **kwargs)
+
+                if i > 0:  # Used fallback
+                    logger.info(f"Successfully used fallback provider {provider.config.provider.value}")
+
+                return result
+
+            except QuotaError as e:
+                logger.warning(f"Quota error with {provider.config.provider.value}: {e}")
+                last_error = e
+                continue
+
+            except Exception as e:
+                logger.warning(f"Error with {provider.config.provider.value}: {e}")
+                last_error = e
+                continue
+
+        # All providers failed
+        error_msg = f"All LLM providers failed. Last error: {last_error}"
+        logger.error(error_msg)
+        raise LLMProviderError(error_msg)
+
+
+# --- Utility Functions ---
+def create_llm_config_from_env(provider_name: str, model: str = None, base_url: str = None) -> LLMConfig:
+    """Create LLM config using environment variables."""
     try:
-        logger.debug(f"Sending request to {api_url} with model {model} (Timeout: {request_timeout}s)")
-        response = requester.post(api_url, headers=headers, json=payload, timeout=request_timeout)
+        provider_enum = LLMProvider(provider_name.lower())
+    except ValueError:
+        raise LLMConfigurationError(f"Invalid provider name: {provider_name}")
 
-        # --- MODIFIED: Check for 429 before raising general HTTPError ---
-        if response.status_code == 429:
-            logger.warning(f"API Quota/Rate Limit Exceeded (HTTP 429). Response: {response.text}")
-            # Extract potential retry-after header (optional)
-            retry_after = response.headers.get("Retry-After")
-            if retry_after:
-                 logger.warning(f"Server suggests waiting {retry_after} seconds.")
-            raise QuotaError(f"API Quota/Rate Limit Exceeded (HTTP 429). Wait and retry. Details: {response.text}")
+    # Default configurations
+    defaults = {
+        LLMProvider.GEMINI: {
+            'model': 'gemini-1.5-flash-latest',
+            'base_url': 'https://generativelanguage.googleapis.com/v1beta/models',
+            'env_keys': ['GOOGLE_API_KEY', 'GEMINI_API_KEY']
+        },
+        LLMProvider.OPENAI: {
+            'model': 'gpt-4',
+            'base_url': 'https://api.openai.com/v1/chat/completions',
+            'env_keys': ['OPENAI_API_KEY']
+        },
+        LLMProvider.ANTHROPIC: {
+            'model': 'claude-3-5-sonnet-20241022',
+            'base_url': 'https://api.anthropic.com/v1/messages',
+            'env_keys': ['ANTHROPIC_API_KEY']
+        },
+        LLMProvider.MISTRAL: {
+            'model': 'mistral-large-latest',
+            'base_url': 'https://api.mistral.ai/v1/chat/completions',
+            'env_keys': ['MISTRAL_API_KEY']
+        },
+        LLMProvider.OLLAMA: {
+            'model': 'llama2',
+            'base_url': 'http://localhost:11434/v1/chat/completions',
+            'env_keys': ['OLLAMA_API_KEY']
+        }
+    }
 
-        response.raise_for_status() # Raise HTTPError for other bad responses (4xx or 5xx)
+    config_defaults = defaults[provider_enum]
 
-        # Extract response content based on API type
-        response_data = response.json()
-        if is_gemini:
-            candidates = response_data.get("candidates", [])
-            if candidates and isinstance(candidates, list):
-                 if candidates[0].get("finishReason") == "SAFETY":
-                     logger.warning("Gemini response blocked due to safety settings.")
-                     safety_ratings = candidates[0].get("safetyRatings", [])
-                     logger.warning(f"Safety Ratings: {safety_ratings}")
-                     return "[ERROR: Response blocked by safety settings]"
-                 content = candidates[0].get("content", {})
-                 parts = content.get("parts", [])
-                 if parts and isinstance(parts, list):
-                     return parts[0].get("text", "")
-            # Check for explicit quota error in Gemini response body (if status wasn't 429)
-            if "error" in response_data and "Resource has been exhausted" in response_data["error"].get("message", ""):
-                 logger.warning(f"Gemini Quota Exceeded (detected in response body): {response_data['error']}")
-                 raise QuotaError(f"Gemini Quota Exceeded. Details: {response_data['error']}")
-            logger.warning(f"Could not extract text from Gemini response: {response_data}")
-            return ""
-        else:
-            choices = response_data.get("choices", [])
-            if choices and isinstance(choices, list):
-                message = choices[0].get("message", {})
-                return message.get("content", "")
-            if "error" in response_data:
-                 # Check for common quota messages in OpenAI/Mistral errors even if status wasn't 429
-                 error_msg = response_data['error'].get("message", "").lower()
-                 if "rate limit" in error_msg or "quota" in error_msg:
-                      logger.warning(f"Cloud API Quota/Rate Limit Error (detected in response body): {response_data['error']}")
-                      raise QuotaError(f"Cloud API Quota/Rate Limit Error. Details: {response_data['error']}")
-                 else:
-                      logger.warning(f"API returned an error: {response_data['error']}")
-                      return f"[ERROR: {response_data['error']}]"
-            logger.warning(f"Could not extract text from OpenAI/Mistral/Ollama style response: {response_data}")
-            return ""
+    # Get API key from environment
+    api_key = None
+    for env_var in config_defaults['env_keys']:
+        api_key = os.getenv(env_var)
+        if api_key:
+            break
 
-    except requests.exceptions.Timeout:
-        logger.error(f"API request timed out after {request_timeout} seconds to {api_url}")
-        raise TimeoutError(f"API request timed out to {api_url}")
-    except requests.exceptions.HTTPError as e: # Catch other HTTP errors (already checked for 429)
-        error_content = response.text if response is not None else "No response received"
-        logger.error(f"API HTTP request failed: {e}")
-        logger.error(f"Response status: {response.status_code if response is not None else 'N/A'}")
-        logger.error(f"Response body: {error_content}")
-        raise Exception(f"API request failed with status {response.status_code if response is not None else 'N/A'}: {error_content}") from e
-    except requests.exceptions.RequestException as e: # Catch other connection errors
-        logger.error(f"API request failed (network/connection): {e}")
-        raise Exception(f"API request failed (network/connection): {e}") from e
-    except (KeyError, IndexError, TypeError) as e:
-         response_data_str = str(response_data) if 'response_data' in locals() else 'N/A'
-         logger.error(f"Failed to parse LLM response structure: {e}")
-         logger.error(f"Raw response data: {response_data_str[:500]}...")
-         raise ValueError(f"Invalid response structure received from LLM: {e}") from e
+    if not api_key and provider_enum != LLMProvider.OLLAMA:
+        raise LLMConfigurationError(f"No API key found in environment for {provider_name}")
+
+    return LLMConfig(
+        provider=provider_enum,
+        model=model or config_defaults['model'],
+        api_key=api_key or 'local',
+        base_url=base_url or config_defaults['base_url']
+    )
 
 
+# --- Backward Compatibility Function ---
+def call_llm(
+        model: str,
+        user_prompt: str,
+        api_key: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: int = 1000,
+        temperature: float = 0.2,
+        base_url: Optional[str] = None,
+        session: Optional[requests.Session] = None
+) -> str:
+    """
+    Backward compatibility function for existing code.
+    Automatically detects provider based on base_url.
+    """
+    if not base_url:
+        raise ValueError("base_url must be provided")
+
+    # Auto-detect provider from base_url
+    if "generativelanguage.googleapis.com" in base_url:
+        provider = LLMProvider.GEMINI
+    elif "api.openai.com" in base_url:
+        provider = LLMProvider.OPENAI
+    elif "api.anthropic.com" in base_url:
+        provider = LLMProvider.ANTHROPIC
+    elif "api.mistral.ai" in base_url:
+        provider = LLMProvider.MISTRAL
+    elif "localhost" in base_url or "ollama" in base_url:
+        provider = LLMProvider.OLLAMA
+    else:
+        # Default to OpenAI-compatible
+        provider = LLMProvider.OPENAI
+
+    config = LLMConfig(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        max_tokens=max_tokens,
+        temperature=temperature
+    )
+
+    llm_provider = LLMProviderFactory.create_provider(config)
+    if session:
+        llm_provider.set_session(session)
+
+    return llm_provider.call_llm(user_prompt, system_prompt, max_tokens=max_tokens, temperature=temperature)
+
+
+# --- JSON Extraction (unchanged) ---
 def fix_malformed_json(text: str) -> str:
-    # Replace smart quotes with straight quotes
-    text = text.replace("“", "\"").replace("”", "\"")
-
-    # Remove triple backticks
+    """Fix common JSON formatting issues."""
+    text = text.replace(""", "\"").replace(""", "\"")
     text = text.replace("```", "")
-
-    # Fix common unclosed quote issues at the end
-    text = re.sub(r'“([^”]*)$', r'"\1"', text)
-
+    text = re.sub(r'"([^"]*)$', r'"\1"', text)
     return text.strip()
 
 def extract_json_from_text(text):

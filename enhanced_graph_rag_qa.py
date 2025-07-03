@@ -1,8 +1,27 @@
-# enhanced_graph_rag_qa.py - COMPLETE INTEGRATION LAYER
+# enhanced_graph_rag_qa.py - COMPLETE INTEGRATION LAYER WITH MULTI-PROVIDER LLM SUPPORT
 
 import logging
 import time
 from typing import Dict, List, Optional, Any
+
+# ENHANCED: Import multi-provider LLM system with fallback
+try:
+    from src.knowledge_graph.llm import (
+        LLMManager,
+        LLMProviderFactory,
+        LLMConfig,
+        LLMProvider,
+        LLMProviderError,
+        QuotaError
+    )
+
+    NEW_LLM_SYSTEM_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ Multi-provider LLM system available for enhanced GraphRAG QA")
+except ImportError as e:
+    NEW_LLM_SYSTEM_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning(f"Multi-provider LLM system not available: {e}. Using legacy system.")
 
 # Import the universal system
 from universal_asset_patterns import (
@@ -19,8 +38,9 @@ logger = logging.getLogger(__name__)
 
 class EnhancedGraphRAGQA(GraphRAGQA):
     """
-    Enhanced version that adds universal pattern support to your existing GraphRAGQA.
-    Completely backward compatible - your existing code continues to work unchanged.
+    Enhanced version that adds universal pattern support AND multi-provider LLM support
+    to your existing GraphRAGQA. Completely backward compatible - your existing code
+    continues to work unchanged.
     """
 
     def __init__(self, *args, **kwargs):
@@ -28,6 +48,10 @@ class EnhancedGraphRAGQA(GraphRAGQA):
         self.enable_universal_patterns = kwargs.pop('enable_universal_patterns', True)
         self.manual_industry = kwargs.pop('manual_industry', None)
         self.pattern_confidence_threshold = kwargs.pop('pattern_confidence_threshold', 0.6)
+
+        # ENHANCED: Extract multi-provider LLM parameters
+        self.enable_multi_provider_llm = kwargs.pop('enable_multi_provider_llm', True)
+        self.config = kwargs.pop('config', {})  # Configuration for multi-provider LLM
 
         # Initialize the base GraphRAGQA system first (unchanged)
         super().__init__(*args, **kwargs)
@@ -37,7 +61,13 @@ class EnhancedGraphRAGQA(GraphRAGQA):
         if self.enable_universal_patterns:
             self._initialize_universal_engine()
 
-        logger.info(f"Enhanced GraphRAG QA initialized. Universal patterns: {self.enable_universal_patterns}")
+        # ENHANCED: Initialize multi-provider LLM system
+        self.llm_managers = {}
+        if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
+            self._initialize_multi_provider_llm()
+
+        logger.info(
+            f"Enhanced GraphRAG QA initialized. Universal patterns: {self.enable_universal_patterns}, Multi-provider LLM: {self.enable_multi_provider_llm}")
 
     def _initialize_universal_engine(self):
         """Initialize the universal pattern engine"""
@@ -64,9 +94,77 @@ class EnhancedGraphRAGQA(GraphRAGQA):
             logger.error(f"Universal engine initialization failed: {e}")
             self.universal_engine = None
 
+    def _initialize_multi_provider_llm(self):
+        """ENHANCED: Initialize multi-provider LLM system for GraphRAG QA tasks"""
+        try:
+            # Import the main LLM configuration manager
+            from GraphRAG_Document_AI_Platform import get_llm_config_manager
+
+            main_llm_manager = get_llm_config_manager(self.config)
+
+            # Create task-specific LLM managers for GraphRAG QA
+            qa_tasks = ['cypher_generation', 'entity_linking', 'answer_generation', 'query_correction']
+
+            for task in qa_tasks:
+                try:
+                    self.llm_managers[task] = main_llm_manager.get_llm_manager(task)
+                    logger.info(f"✅ Initialized LLM manager for {task}")
+                except Exception as e:
+                    logger.warning(f"Could not initialize LLM manager for {task}: {e}")
+                    self.llm_managers[task] = None
+
+        except ImportError as e:
+            logger.warning(f"Could not import main LLM configuration manager: {e}")
+            self.llm_managers = {}
+
+    def _enhanced_llm_call(self, task_name: str, prompt: str, system_prompt: str = None, **kwargs) -> str:
+        """
+        ENHANCED: Enhanced LLM call with multi-provider support.
+        Falls back to base system if enhanced LLM is not available.
+        """
+        # Try enhanced system first
+        if (self.enable_multi_provider_llm and
+                NEW_LLM_SYSTEM_AVAILABLE and
+                task_name in self.llm_managers and
+                self.llm_managers[task_name]):
+
+            try:
+                logger.debug(f"🎯 Using enhanced LLM system for {task_name}")
+                return self.llm_managers[task_name].call_llm(
+                    user_prompt=prompt,
+                    system_prompt=system_prompt,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.warning(f"Enhanced LLM failed for {task_name}: {e}, falling back to base system")
+
+        # Fall back to base GraphRAG system
+        logger.debug(f"🔄 Using base GraphRAG LLM system for {task_name}")
+
+        # Call the base system's LLM method
+        if hasattr(self, 'llm') and self.llm:
+            try:
+                # Try to use the base system's LLM call method
+                if hasattr(self.llm, 'call'):
+                    return self.llm.call(prompt, system_prompt=system_prompt, **kwargs)
+                elif hasattr(self.llm, 'invoke'):
+                    return self.llm.invoke(prompt, **kwargs)
+                elif hasattr(self.llm, 'generate'):
+                    response = self.llm.generate([prompt], **kwargs)
+                    return response.generations[0][0].text if response.generations else ""
+                else:
+                    # Direct call if it's a callable
+                    return self.llm(prompt, **kwargs)
+            except Exception as e:
+                logger.error(f"Base LLM call failed for {task_name}: {e}")
+                return ""
+
+        logger.warning(f"No LLM available for {task_name}")
+        return ""
+
     def _generate_cypher_query(self, question: str, linked_entities: Dict[str, Optional[str]]) -> Optional[str]:
         """
-        Enhanced Cypher generation that tries universal patterns first, then falls back to base system.
+        ENHANCED: Cypher generation with multi-provider LLM support AND universal patterns.
         This overrides the base method but maintains full compatibility.
         """
 
@@ -93,13 +191,133 @@ class EnhancedGraphRAGQA(GraphRAGQA):
             except Exception as e:
                 logger.warning(f"Universal pattern generation failed: {e}")
 
+        # ENHANCED: Try multi-provider LLM for Cypher generation
+        if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
+            try:
+                logger.debug("Attempting multi-provider LLM Cypher generation")
+
+                # Create enhanced prompt for Cypher generation
+                entity_context = ""
+                if linked_entities:
+                    entity_context = f"Linked entities: {linked_entities}"
+
+                cypher_prompt = f"""
+                Generate a Cypher query to answer the following question:
+                Question: {question}
+                {entity_context}
+
+                Please provide only the Cypher query without any additional text.
+                """
+
+                system_prompt = """You are a Neo4j Cypher query expert. Generate accurate and efficient Cypher queries based on the given question and entity context."""
+
+                cypher_response = self._enhanced_llm_call(
+                    task_name='cypher_generation',
+                    prompt=cypher_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=500,
+                    temperature=0.1
+                )
+
+                if cypher_response and cypher_response.strip():
+                    logger.info("Multi-provider LLM Cypher generation successful")
+                    return cypher_response.strip()
+
+            except Exception as e:
+                logger.warning(f"Multi-provider LLM Cypher generation failed: {e}")
+
         # Fallback to original method
         logger.debug("Using base GraphRAG Cypher generation")
         return super()._generate_cypher_query(question, linked_entities)
 
+    def _link_entities(self, question: str) -> Dict[str, Optional[str]]:
+        """
+        ENHANCED: Entity linking with multi-provider LLM support.
+        """
+        # ENHANCED: Try multi-provider LLM for entity linking
+        if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
+            try:
+                logger.debug("Attempting multi-provider LLM entity linking")
+
+                entity_linking_prompt = f"""
+                Identify and extract named entities from the following question:
+                Question: {question}
+
+                Please identify entities that might be relevant for a knowledge graph query.
+                Return the entities in a simple format like: entity1, entity2, entity3
+                """
+
+                system_prompt = """You are an expert at identifying named entities in questions for knowledge graph queries. Focus on entities that would be nodes in a graph database."""
+
+                entity_response = self._enhanced_llm_call(
+                    task_name='entity_linking',
+                    prompt=entity_linking_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=200,
+                    temperature=0.1
+                )
+
+                if entity_response and entity_response.strip():
+                    # Parse the response to extract entities
+                    entities = {}
+                    for entity in entity_response.strip().split(','):
+                        entity = entity.strip()
+                        if entity:
+                            entities[entity] = None  # Neo4j ID would be resolved later
+
+                    if entities:
+                        logger.info(f"Multi-provider LLM entity linking successful: {entities}")
+                        return entities
+
+            except Exception as e:
+                logger.warning(f"Multi-provider LLM entity linking failed: {e}")
+
+        # Fallback to original method
+        logger.debug("Using base GraphRAG entity linking")
+        return super()._link_entities(question)
+
+    def _generate_answer(self, question: str, context: str) -> str:
+        """
+        ENHANCED: Answer generation with multi-provider LLM support.
+        """
+        # ENHANCED: Try multi-provider LLM for answer generation
+        if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
+            try:
+                logger.debug("Attempting multi-provider LLM answer generation")
+
+                answer_prompt = f"""
+                Based on the following context from a knowledge graph, answer the user's question:
+
+                Question: {question}
+                Context: {context}
+
+                Please provide a clear, concise answer based on the context provided.
+                """
+
+                system_prompt = """You are an expert at answering questions based on knowledge graph data. Provide accurate, informative answers based on the given context."""
+
+                answer = self._enhanced_llm_call(
+                    task_name='answer_generation',
+                    prompt=answer_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=500,
+                    temperature=0.3
+                )
+
+                if answer and answer.strip():
+                    logger.info("Multi-provider LLM answer generation successful")
+                    return answer.strip()
+
+            except Exception as e:
+                logger.warning(f"Multi-provider LLM answer generation failed: {e}")
+
+        # Fallback to original method
+        logger.debug("Using base GraphRAG answer generation")
+        return super()._generate_answer(question, context)
+
     def answer_question(self, question: str) -> Dict[str, Any]:
         """
-        Enhanced question answering that includes universal pattern metadata.
+        ENHANCED: Question answering with multi-provider LLM and universal pattern metadata.
         Maintains full compatibility with base GraphRAGQA.
         """
 
@@ -108,8 +326,26 @@ class EnhancedGraphRAGQA(GraphRAGQA):
         # Clear previous universal result
         self._last_universal_result = None
 
-        # Use the enhanced base method (which will call our enhanced _generate_cypher_query)
+        # Use the enhanced base method (which will call our enhanced methods)
         result = super().answer_question(question)
+
+        # ENHANCED: Add multi-provider LLM metadata
+        llm_providers_used = []
+        for task_name, manager in self.llm_managers.items():
+            if manager:
+                try:
+                    primary_provider = manager.primary_provider
+                    fallback_providers = manager.fallback_providers
+
+                    providers = [primary_provider.config.provider.value]
+                    providers.extend([fp.config.provider.value for fp in fallback_providers])
+
+                    llm_providers_used.append({
+                        'task': task_name,
+                        'providers': providers
+                    })
+                except Exception as e:
+                    logger.debug(f"Could not get provider info for {task_name}: {e}")
 
         # Add universal enhancement metadata if available
         if hasattr(self, '_last_universal_result') and self._last_universal_result:
@@ -121,21 +357,33 @@ class EnhancedGraphRAGQA(GraphRAGQA):
                 'pattern_used': universal_data.get('pattern_used'),
                 'domain_detected': universal_data.get('domain_detected', 'unknown'),
                 'pattern_category': universal_data.get('pattern_category'),
+                'llm_providers_used': llm_providers_used,
                 'universal_enhancement': {
                     'enabled': self.enable_universal_patterns,
                     'industry_detection': True,
                     'pattern_adaptation': True,
                     'confidence_threshold': self.pattern_confidence_threshold
+                },
+                'multi_provider_llm': {
+                    'enabled': self.enable_multi_provider_llm,
+                    'system_available': NEW_LLM_SYSTEM_AVAILABLE,
+                    'providers_configured': len(llm_providers_used)
                 }
             })
         else:
             # Base system was used
             result.update({
                 'generation_approach': 'base_system',
+                'llm_providers_used': llm_providers_used,
                 'universal_enhancement': {
                     'enabled': self.enable_universal_patterns,
                     'pattern_matched': False,
                     'fallback_used': True
+                },
+                'multi_provider_llm': {
+                    'enabled': self.enable_multi_provider_llm,
+                    'system_available': NEW_LLM_SYSTEM_AVAILABLE,
+                    'providers_configured': len(llm_providers_used)
                 }
             })
 
@@ -223,12 +471,6 @@ class EnhancedGraphRAGQA(GraphRAGQA):
                 'relationship_types': []
             }
 
-    # Also add this method if it doesn't exist
-    def is_enhanced(self):
-        """Check if this is an enhanced GraphRAG engine"""
-        return hasattr(self, 'universal_engine') and self.universal_engine is not None
-
-    # And add these additional methods for completeness
     def get_pattern_stats(self):
         """Get pattern usage statistics"""
         if not hasattr(self, 'universal_engine') or not self.universal_engine:
@@ -247,12 +489,14 @@ class EnhancedGraphRAGQA(GraphRAGQA):
             return {}
 
     def get_system_health(self):
-        """Get system health metrics"""
+        """ENHANCED: Get system health metrics including multi-provider LLM status"""
         health = {
             'neo4j_connected': False,
             'vector_db_ready': False,
             'llm_available': False,
-            'universal_patterns_active': False
+            'universal_patterns_active': False,
+            'multi_provider_llm_active': False,
+            'llm_providers_ready': []
         }
 
         try:
@@ -274,10 +518,81 @@ class EnhancedGraphRAGQA(GraphRAGQA):
             if hasattr(self, 'universal_engine') and self.universal_engine:
                 health['universal_patterns_active'] = True
 
+            # ENHANCED: Check multi-provider LLM
+            if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
+                health['multi_provider_llm_active'] = True
+
+                # Check each LLM manager
+                for task_name, manager in self.llm_managers.items():
+                    if manager:
+                        try:
+                            primary_provider = manager.primary_provider
+                            health['llm_providers_ready'].append({
+                                'task': task_name,
+                                'provider': primary_provider.config.provider.value,
+                                'ready': True
+                            })
+                        except Exception as e:
+                            health['llm_providers_ready'].append({
+                                'task': task_name,
+                                'provider': 'unknown',
+                                'ready': False,
+                                'error': str(e)
+                            })
+
         except Exception as e:
             logger.warning(f"Error checking system health: {e}")
 
         return health
+
+    def get_llm_provider_info(self) -> Dict[str, Any]:
+        """ENHANCED: Get detailed information about configured LLM providers"""
+        if not self.enable_multi_provider_llm or not NEW_LLM_SYSTEM_AVAILABLE:
+            return {
+                'multi_provider_enabled': False,
+                'system_available': NEW_LLM_SYSTEM_AVAILABLE,
+                'providers': []
+            }
+
+        provider_info = {
+            'multi_provider_enabled': True,
+            'system_available': NEW_LLM_SYSTEM_AVAILABLE,
+            'providers': []
+        }
+
+        for task_name, manager in self.llm_managers.items():
+            if manager:
+                try:
+                    primary_provider = manager.primary_provider
+                    fallback_providers = manager.fallback_providers
+
+                    task_providers = {
+                        'task': task_name,
+                        'primary_provider': {
+                            'name': primary_provider.config.provider.value,
+                            'model': primary_provider.config.model,
+                            'ready': True
+                        },
+                        'fallback_providers': []
+                    }
+
+                    for fp in fallback_providers:
+                        task_providers['fallback_providers'].append({
+                            'name': fp.config.provider.value,
+                            'model': fp.config.model,
+                            'ready': True
+                        })
+
+                    provider_info['providers'].append(task_providers)
+
+                except Exception as e:
+                    provider_info['providers'].append({
+                        'task': task_name,
+                        'error': str(e),
+                        'ready': False
+                    })
+
+        return provider_info
 
     def switch_industry(self, industry_name: str) -> bool:
         """Manually switch industry context"""
@@ -303,6 +618,10 @@ class EnhancedGraphRAGQA(GraphRAGQA):
         """Check if universal enhancements are active"""
         return self.enable_universal_patterns and self.universal_engine is not None
 
+    def is_multi_provider_enabled(self) -> bool:
+        """ENHANCED: Check if multi-provider LLM is active"""
+        return self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE and bool(self.llm_managers)
+
 
 # Backward compatibility function - drop-in replacement
 def create_enhanced_graphrag_qa(*args, **kwargs) -> EnhancedGraphRAGQA:
@@ -310,6 +629,20 @@ def create_enhanced_graphrag_qa(*args, **kwargs) -> EnhancedGraphRAGQA:
     Factory function for creating enhanced GraphRAG QA.
     Use this as a drop-in replacement for GraphRAGQA.
     """
+    return EnhancedGraphRAGQA(*args, **kwargs)
+
+
+# ENHANCED: New factory function with multi-provider support
+def create_multi_provider_graphrag_qa(config: Dict[str, Any], *args, **kwargs) -> EnhancedGraphRAGQA:
+    """
+    Factory function for creating enhanced GraphRAG QA with multi-provider LLM support.
+
+    Args:
+        config: Configuration dictionary for multi-provider LLM
+        *args, **kwargs: Additional arguments for GraphRAG QA
+    """
+    kwargs['config'] = config
+    kwargs['enable_multi_provider_llm'] = True
     return EnhancedGraphRAGQA(*args, **kwargs)
 
 
@@ -324,6 +657,6 @@ def upgrade_existing_graphrag(existing_qa_engine) -> EnhancedGraphRAGQA:
 
 
 if __name__ == "__main__":
-    print("Enhanced GraphRAG QA Integration Layer")
-    print("Provides universal pattern support with full backward compatibility")
+    print("Enhanced GraphRAG QA Integration Layer with Multi-Provider LLM Support")
+    print("Provides universal pattern support AND multi-provider LLM with full backward compatibility")
     print("Ready for integration with your existing system!")

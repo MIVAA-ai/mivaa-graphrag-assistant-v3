@@ -40,26 +40,42 @@ try:
 except ImportError:
     raise ImportError("Neo4j Python driver not found. Please install: pip install neo4j")
 
-# LLM Imports
+# ENHANCED: Import new LLM system with fallback to legacy
 try:
-    from src.knowledge_graph.llm import call_llm, extract_json_from_text, QuotaError
+    from src.knowledge_graph.llm import (
+        LLMManager,
+        LLMProviderError,
+        QuotaError,
+        call_llm as legacy_call_llm,
+        extract_json_from_text
+    )
 
-    print("[INFO] Using actual 'call_llm' function.")
+    NEW_LLM_SYSTEM_AVAILABLE = True
+    print("[INFO] Using enhanced multi-provider LLM system.")
 except ImportError:
-    print("[WARN] 'call_llm' not found. Using mock function.")
+    NEW_LLM_SYSTEM_AVAILABLE = False
+    print("[WARN] Enhanced LLM system not found. Using legacy call_llm function.")
+
+    # Legacy imports
+    try:
+        from src.knowledge_graph.llm import call_llm as legacy_call_llm, extract_json_from_text, QuotaError
+
+        print("[INFO] Using legacy 'call_llm' function.")
+    except ImportError:
+        print("[WARN] 'call_llm' not found. Using mock function.")
 
 
-    class QuotaError(Exception):
-        pass
+        class QuotaError(Exception):
+            pass
 
 
-    def call_llm(*args, **kwargs):
-        print("[WARN] Mock call_llm returning placeholder.")
-        return "Mock response"
+        def legacy_call_llm(*args, **kwargs):
+            print("[WARN] Mock call_llm returning placeholder.")
+            return "Mock response"
 
 
-    def extract_json_from_text(text):
-        return None
+        def extract_json_from_text(text):
+            return None
 
 # Vector DB Imports
 try:
@@ -76,8 +92,7 @@ try:
     print("[INFO] Imported SentenceTransformer.")
     embeddings_available = True
 except ImportError:
-    print(
-        "[WARN] 'sentence-transformers' library not found (pip install sentence-transformers). Few-shot retrieval/storage might be affected.")
+    print("[WARN] 'sentence-transformers' library not found. Few-shot retrieval/storage might be affected.")
     embeddings_available = False
 
 
@@ -189,7 +204,7 @@ class EmbeddingModelWrapper:
 
 class GraphRAGQA:
     """
-    Enhanced GraphRAG Q&A with improved entity linking and query generation.
+    Enhanced GraphRAG Q&A with improved entity linking, query generation, and multi-provider LLM support.
     """
 
     def __init__(self, *,
@@ -203,7 +218,9 @@ class GraphRAGQA:
                  max_cypher_retries: int = 1,
                  # New parameters for improved functionality
                  fuzzy_threshold: int = 70,
-                 enable_query_caching: bool = True):
+                 enable_query_caching: bool = True,
+                 # ENHANCED: New LLM manager parameter
+                 llm_manager: Optional['LLMManager'] = None):
 
         logger.info(f"Initializing Enhanced GraphRAG QA Engine...")
 
@@ -221,6 +238,17 @@ class GraphRAGQA:
         self.db_name = db_name
         self.fuzzy_threshold = fuzzy_threshold
         self.enable_query_caching = enable_query_caching
+
+        # ENHANCED: Store LLM manager for new multi-provider system
+        self.llm_manager = llm_manager
+
+        # Determine which LLM system to use
+        self.use_new_llm_system = NEW_LLM_SYSTEM_AVAILABLE and llm_manager is not None
+
+        if self.use_new_llm_system:
+            logger.info("✅ Using enhanced multi-provider LLM system")
+        else:
+            logger.info("ℹ️ Using legacy LLM system")
 
         # Initialize status flags and components
         self.is_neo4j_connected = False
@@ -246,14 +274,15 @@ class GraphRAGQA:
         self._initialize_vector_db(chroma_path, collection_name)
         self._initialize_fewshot_manager()
 
-        # Store base LLM config
+        # Store base LLM config for backward compatibility
         self.llm_qna_config_base = {"model": llm_model, "api_key": llm_api_key, "base_url": llm_base_url}
         self.llm_qna_config_extra = llm_config_extra if llm_config_extra else {}
 
         logger.info(f"GraphRAG engine initialization complete. "
                     f"Neo4j: {self.is_neo4j_connected}, "
                     f"Vector: {self.is_vector_search_enabled}, "
-                    f"Few-Shot: {self.fewshot_manager is not None}")
+                    f"Few-Shot: {self.fewshot_manager is not None}, "
+                    f"LLM System: {'Enhanced' if self.use_new_llm_system else 'Legacy'}")
 
     def _initialize_neo4j(self):
         """Initialize Neo4j connection and graph store."""
@@ -351,6 +380,32 @@ class GraphRAGQA:
                 logger.error(f"Failed to initialize few-shot manager: {e}")
                 self.fewshot_manager = None
 
+    # ENHANCED: New LLM calling method with fallback support
+    def _call_llm(self, user_prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+        """Enhanced LLM calling with multi-provider support and fallback to legacy system."""
+        if self.use_new_llm_system and self.llm_manager:
+            try:
+                # Use new multi-provider system
+                return self.llm_manager.call_llm(user_prompt, system_prompt, **kwargs)
+            except Exception as e:
+                logger.warning(f"Enhanced LLM system failed: {e}, falling back to legacy")
+                # Fall back to legacy system
+                self.use_new_llm_system = False
+
+        # Use legacy system
+        try:
+            return legacy_call_llm(
+                model=self.llm_qna_config_base['model'],
+                user_prompt=user_prompt,
+                api_key=self.llm_qna_config_base['api_key'],
+                system_prompt=system_prompt,
+                base_url=self.llm_qna_config_base.get('base_url'),
+                **{k: v for k, v in kwargs.items() if k in ['max_tokens', 'temperature', 'session']}
+            )
+        except Exception as e:
+            logger.error(f"Legacy LLM system also failed: {e}")
+            raise
+
     async def close(self):
         """Close all connections."""
         if self.driver:
@@ -370,7 +425,10 @@ class GraphRAGQA:
 
     def is_ready(self) -> bool:
         """Check if the engine is ready for Q&A."""
-        return self.is_neo4j_connected and bool(self.llm_qna_config_base.get('api_key'))
+        return self.is_neo4j_connected and (
+                (self.use_new_llm_system and self.llm_manager is not None) or
+                bool(self.llm_qna_config_base.get('api_key'))
+        )
 
     def _get_schema_string(self) -> str:
         """Retrieve graph schema for query generation."""
@@ -583,19 +641,16 @@ class GraphRAGQA:
             logger.error(f"Failed to format user template: missing {e}")
             user_prompt = f"{structured_input}\nCypher query:"
 
-        # Call LLM
+        # ENHANCED: Call LLM using new system with fallback
         try:
             temp = self.llm_config_extra.get("cypher_temperature", 0.0)
             max_tokens = self.llm_config_extra.get("cypher_max_tokens", 500)
 
-            response_text = call_llm(
-                model=self.llm_qna_config_base['model'],
+            response_text = self._call_llm(
                 user_prompt=user_prompt,
-                api_key=self.llm_qna_config_base['api_key'],
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
-                temperature=temp,
-                base_url=self.llm_qna_config_base.get('base_url')
+                temperature=temp
             )
 
             return self._extract_and_validate_cypher(response_text)
@@ -840,14 +895,12 @@ Instructions:
             temp = self.llm_config_extra.get("qna_temperature", 0.1)
             max_tokens = self.llm_config_extra.get("qna_max_tokens", 500)
 
-            answer_text = call_llm(
-                model=self.llm_qna_config_base['model'],
+            # ENHANCED: Use new LLM system with fallback
+            answer_text = self._call_llm(
                 user_prompt=user_prompt,
-                api_key=self.llm_qna_config_base['api_key'],
                 system_prompt=system_prompt,
                 temperature=temp,
-                max_tokens=max_tokens,
-                base_url=self.llm_qna_config_base.get('base_url')
+                max_tokens=max_tokens
             )
 
             return {
@@ -871,7 +924,7 @@ Instructions:
         """Evaluate why query returned empty results and attempt revision."""
         logger.info("Evaluating empty result query...")
 
-        if not self.llm_instance_for_correction:
+        if not self.llm_instance_for_correction and not self.use_new_llm_system:
             return None
 
         schema_str = self._get_schema_string()
@@ -885,14 +938,12 @@ Instructions:
                 schema=schema_str
             )
 
-            eval_response = call_llm(
-                model=self.llm_qna_config_base['model'],
-                api_key=self.llm_qna_config_base['api_key'],
+            # ENHANCED: Use new LLM system with fallback
+            eval_response = self._call_llm(
                 user_prompt=eval_user,
                 system_prompt=eval_system,
                 temperature=0.1,
-                max_tokens=50,
-                base_url=self.llm_qna_config_base.get('base_url')
+                max_tokens=50
             )
 
             evaluation = eval_response.strip().upper() if eval_response else "UNKNOWN"
@@ -908,14 +959,12 @@ Instructions:
                         schema=schema_str
                     )
 
-                    revise_response = call_llm(
-                        model=self.llm_qna_config_base['model'],
-                        api_key=self.llm_qna_config_base['api_key'],
+                    # ENHANCED: Use new LLM system with fallback
+                    revise_response = self._call_llm(
                         user_prompt=revise_user,
                         system_prompt=revise_system,
                         temperature=0.3,
-                        max_tokens=500,
-                        base_url=self.llm_qna_config_base.get('base_url')
+                        max_tokens=500
                     )
 
                     if revise_response and "NO_REVISION" not in revise_response.upper():
@@ -936,7 +985,7 @@ Instructions:
         """
         Answer user question using enhanced Graph RAG with retry and revision.
         """
-        logger.info(f"=== Starting Enhanced GraphRAG for: {question} ===")
+        logger.info(f"=== Enhanced GraphRAG for: {question} ===")
 
         if not self.is_ready():
             return {
@@ -1065,7 +1114,8 @@ Instructions:
                 "answer": final_answer,
                 "sources": [],
                 "cypher_query": current_cypher_query or initial_cypher_query or "N/A",
-                "linked_entities": linked_entities
+                "linked_entities": linked_entities,
+                "llm_system_used": "Enhanced" if self.use_new_llm_system else "Legacy"
             }
 
         # Generate final answer
@@ -1074,6 +1124,7 @@ Instructions:
         # Add metadata
         answer_dict["cypher_query"] = current_cypher_query or initial_cypher_query or "N/A"
         answer_dict["linked_entities"] = linked_entities
+        answer_dict["llm_system_used"] = "Enhanced" if self.use_new_llm_system else "Legacy"
 
         if execution_error:
             answer_dict["error_info"] = f"Query failed after {retries} attempts: {type(execution_error).__name__}"
@@ -1085,9 +1136,10 @@ Instructions:
         logger.info("=== GraphRAG processing complete ===")
         return answer_dict
 
+
 # Example usage and main block
 if __name__ == "__main__":
-    print("=== Enhanced GraphRAG QA System ===")
+    print("=== Enhanced GraphRAG QA System with Multi-Provider LLM Support ===")
 
     # ADDED: Load .env file first
     load_dotenv()
@@ -1142,7 +1194,8 @@ if __name__ == "__main__":
         config_data['NEO4J_URI'] = os.getenv('NEO4J_URI') or config_data.get('NEO4J_URI')
         config_data['NEO4J_USER'] = os.getenv('NEO4J_USER') or config_data.get('NEO4J_USER')
         config_data['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD') or config_data.get('NEO4J_PASSWORD')
-        config_data['LLM_API_KEY'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config_data.get('LLM_API_KEY')
+        config_data['LLM_API_KEY'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config_data.get(
+            'LLM_API_KEY')
         config_data['LLM_MODEL'] = os.getenv('LLM_MODEL') or config_data.get('LLM_MODEL')
 
         # Validate required config
@@ -1198,6 +1251,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         print("✅ Enhanced GraphRAG QA Engine ready!")
+        print(f"🔧 LLM System: {'Enhanced Multi-Provider' if qa_engine.use_new_llm_system else 'Legacy'}")
         print("\n🔍 Ask questions (type 'exit' or 'quit' to stop):")
 
         # Interactive loop
@@ -1218,6 +1272,7 @@ if __name__ == "__main__":
 
                 print(f"\n💡 Answer:\n{response.get('answer', 'N/A')}")
                 print(f"\n⚡ Processing time: {processing_time:.2f}s")
+                print(f"🔧 LLM System Used: {response.get('llm_system_used', 'Unknown')}")
 
                 if response.get('cypher_query') != 'N/A':
                     print(f"\n🔧 Cypher Query:\n{response['cypher_query']}")

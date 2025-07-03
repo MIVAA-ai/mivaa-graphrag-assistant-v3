@@ -1,10 +1,9 @@
-# GraphRAG_Document_AI_Platform.py (Main App Entry Point - LLM OCR Only VERSION)
+# GraphRAG_Document_AI_Platform.py - ENHANCED WITH MULTI-PROVIDER LLM SUPPORT
 
 import nest_asyncio
 
 nest_asyncio.apply()
 
-# FIXED: Move st.set_page_config to be the VERY FIRST Streamlit command
 import streamlit as st
 
 st.set_page_config(
@@ -14,7 +13,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Now import everything else
 import os
 import logging
 import sys
@@ -23,7 +21,7 @@ import spacy
 import configparser
 import requests
 import re
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Union
 from dotenv import load_dotenv
 from enhanced_ocr_pipeline import EnhancedOCRPipeline
 
@@ -41,7 +39,18 @@ except ImportError:
 try:
     from neo4j_exporter import Neo4jExporter
     from enhanced_graph_rag_qa import EnhancedGraphRAGQA
-    from llama_index.llms.gemini import Gemini
+
+    # ENHANCED: Import new LLM system
+    from src.knowledge_graph.llm import (
+        LLMProviderFactory,
+        LLMManager,
+        LLMConfig,
+        LLMProvider,
+        create_llm_config_from_env,
+        LLMConfigurationError,
+        LLMProviderError
+    )
+
     import chromadb
     from chromadb.utils import embedding_functions
     from sentence_transformers import SentenceTransformer
@@ -52,6 +61,203 @@ except ImportError as e:
     logging.critical(f"Fatal Import Error in graphrag_app.py: {e}")
     st.error(f"Fatal Import Error: {e}. Cannot start application.")
     st.stop()
+
+
+# ENHANCED: LLM Factory and Management Classes
+class LLMConfigurationManager:
+    """Manages LLM configurations and provider instantiation."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.providers = {}
+        self.llm_managers = {}
+
+    def _get_provider_config(self, provider_name: str) -> Dict[str, Any]:
+        """Get provider configuration from config."""
+        providers_config = self.config.get('llm', {}).get('providers', {})
+        provider_config = providers_config.get(provider_name, {})
+
+        if not provider_config:
+            raise LLMConfigurationError(f"Provider '{provider_name}' not found in configuration")
+
+        if not provider_config.get('enabled', False):
+            raise LLMConfigurationError(f"Provider '{provider_name}' is disabled in configuration")
+
+        return provider_config
+
+    def create_provider(self, provider_name: str, task_overrides: Dict[str, Any] = None) -> 'BaseLLMProvider':
+        """Create a provider instance with optional task-specific overrides."""
+        provider_config = self._get_provider_config(provider_name)
+
+        # Apply task-specific overrides
+        if task_overrides:
+            provider_config = {**provider_config, **task_overrides}
+
+        # Create LLM config
+        config_dict = {
+            'provider': provider_name,
+            'model': provider_config.get('model'),
+            'api_key': provider_config.get('api_key'),
+            'base_url': provider_config.get('base_url'),
+            'max_tokens': provider_config.get('max_tokens', 2000),
+            'temperature': provider_config.get('temperature', 0.1),
+            'timeout': provider_config.get('timeout', 60),
+            'extra_params': {k: v for k, v in provider_config.items()
+                             if k not in ['provider', 'model', 'api_key', 'base_url', 'max_tokens', 'temperature',
+                                          'timeout']}
+        }
+
+        return LLMProviderFactory.create_from_dict(config_dict)
+
+    def create_task_llm_manager(self, task_name: str) -> LLMManager:
+        """Create an LLM manager for a specific task with fallback support."""
+        # Get task-specific configuration
+        task_config = self.config.get(task_name, {})
+
+        # Determine primary provider
+        primary_provider_name = task_config.get('provider') or self.config.get('llm', {}).get('primary_provider',
+                                                                                              'gemini')
+
+        # Create task-specific overrides
+        task_overrides = {}
+        if task_config.get('model'):
+            task_overrides['model'] = task_config['model']
+        if task_config.get('max_tokens'):
+            task_overrides['max_tokens'] = task_config['max_tokens']
+        if task_config.get('temperature') is not None:
+            task_overrides['temperature'] = task_config['temperature']
+
+        try:
+            # Create primary provider
+            primary_provider = self.create_provider(primary_provider_name, task_overrides)
+
+            # Create fallback providers
+            fallback_providers = []
+
+            # Check if fallback is enabled
+            enable_fallback = self.config.get('llm', {}).get('enable_fallback', True)
+            if enable_fallback:
+                # Get fallback chain
+                fallback_chain = self._get_fallback_chain(primary_provider_name)
+
+                for fallback_name in fallback_chain[:2]:  # Limit to 2 fallback providers
+                    try:
+                        fallback_provider = self.create_provider(fallback_name, task_overrides)
+                        fallback_providers.append(fallback_provider)
+                    except Exception as e:
+                        logger.warning(f"Could not create fallback provider {fallback_name}: {e}")
+
+            # Create and cache LLM manager
+            manager = LLMManager(primary_provider, fallback_providers)
+            self.llm_managers[task_name] = manager
+
+            logger.info(
+                f"Created LLM manager for {task_name}: primary={primary_provider_name}, fallbacks={len(fallback_providers)}")
+            return manager
+
+        except Exception as e:
+            logger.error(f"Failed to create LLM manager for {task_name}: {e}")
+            raise LLMConfigurationError(f"Could not create LLM manager for {task_name}: {e}")
+
+    def _get_fallback_chain(self, provider_name: str) -> List[str]:
+        """Get fallback chain for a provider."""
+        # First check provider policies
+        policies = self.config.get('provider_policies', {})
+        fallback_chains = policies.get('fallback_chains', {})
+
+        if provider_name in fallback_chains:
+            return fallback_chains[provider_name]
+
+        # Default fallback chain
+        default_fallbacks = {
+            'gemini': ['openai', 'claude'],
+            'openai': ['gemini', 'claude'],
+            'claude': ['gemini', 'openai'],
+            'mistral': ['gemini', 'openai'],
+            'anthropic': ['gemini', 'openai']
+        }
+
+        return default_fallbacks.get(provider_name, ['gemini', 'openai'])
+
+    def get_llm_manager(self, task_name: str) -> LLMManager:
+        """Get or create LLM manager for a task."""
+        if task_name not in self.llm_managers:
+            return self.create_task_llm_manager(task_name)
+        return self.llm_managers[task_name]
+
+    def get_available_providers(self) -> List[str]:
+        """Get list of available and enabled providers."""
+        providers_config = self.config.get('llm', {}).get('providers', {})
+        return [name for name, config in providers_config.items() if config.get('enabled', False)]
+
+
+# ENHANCED: Global LLM Configuration Manager
+_llm_config_manager = None
+
+
+def get_llm_config_manager(config: Dict[str, Any]) -> LLMConfigurationManager:
+    """Get or create global LLM configuration manager."""
+    global _llm_config_manager
+    if _llm_config_manager is None:
+        _llm_config_manager = LLMConfigurationManager(config)
+    return _llm_config_manager
+
+
+# ENHANCED: Task-specific LLM getters
+@st.cache_resource
+def get_triple_extraction_llm(config: Dict[str, Any]):
+    """Get LLM manager for triple extraction."""
+    try:
+        llm_manager = get_llm_config_manager(config)
+        return llm_manager.get_llm_manager('triple_extraction')
+    except Exception as e:
+        logger.error(f"Failed to create triple extraction LLM: {e}")
+        return None
+
+
+@st.cache_resource
+def get_relationship_inference_llm(config: Dict[str, Any]):
+    """Get LLM manager for relationship inference."""
+    try:
+        llm_manager = get_llm_config_manager(config)
+        return llm_manager.get_llm_manager('relationship_inference')
+    except Exception as e:
+        logger.error(f"Failed to create relationship inference LLM: {e}")
+        return None
+
+
+@st.cache_resource
+def get_text_sanitization_llm(config: Dict[str, Any]):
+    """Get LLM manager for text sanitization."""
+    try:
+        llm_manager = get_llm_config_manager(config)
+        return llm_manager.get_llm_manager('text_sanitization')
+    except Exception as e:
+        logger.error(f"Failed to create text sanitization LLM: {e}")
+        return None
+
+
+@st.cache_resource
+def get_cypher_correction_llm(config: Dict[str, Any]):
+    """Get LLM manager for Cypher correction."""
+    try:
+        llm_manager = get_llm_config_manager(config)
+        return llm_manager.get_llm_manager('cypher_correction')
+    except Exception as e:
+        logger.error(f"Failed to create Cypher correction LLM: {e}")
+        return None
+
+
+# ENHANCED: Generic LLM caller for backward compatibility
+def call_task_llm(task_name: str, user_prompt: str, config: Dict[str, Any], system_prompt: str = None, **kwargs) -> str:
+    """Generic function to call LLM for any task."""
+    try:
+        llm_manager = get_llm_config_manager(config)
+        task_llm = llm_manager.get_llm_manager(task_name)
+        return task_llm.call_llm(user_prompt, system_prompt, **kwargs)
+    except Exception as e:
+        logger.error(f"Failed to call LLM for task {task_name}: {e}")
+        raise
 
 
 # FIXED: API Key masking utility functions
@@ -86,7 +292,7 @@ def get_masked_config_for_logging(config: Dict[str, Any]) -> Dict[str, Any]:
     return mask_recursive(config)
 
 
-# Enhanced Custom CSS
+# Enhanced Custom CSS (unchanged)
 st.markdown("""
 <style>
     .stApp {
@@ -148,7 +354,6 @@ logger = logging.getLogger(__name__)
 @st.cache_resource
 def get_enhanced_ocr_pipeline(config):
     """Initialize the enhanced LLM OCR pipeline with FIXED configuration mapping"""
-    # ADDED: Ensure .env is loaded
     load_dotenv()
 
     logger.info("Initializing Enhanced LLM OCR Pipeline...")
@@ -216,7 +421,6 @@ def get_enhanced_ocr_pipeline(config):
 @st.cache_data
 def load_config():
     """UPDATED: Load configuration with proper TOML structure mapping"""
-    # ADDED: Load .env file first
     load_dotenv()
 
     config = {}
@@ -293,32 +497,40 @@ def load_config():
             config['llm']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config['llm'].get(
                 'api_key')
 
-        if config.get('llm', {}).get('ocr') and isinstance(config['llm']['ocr'], dict):
-            ocr_config = config['llm']['ocr']
-            ocr_config['gemini_api_key'] = os.getenv('GOOGLE_API_KEY') or ocr_config.get('gemini_api_key')
-            ocr_config['mistral_api_key'] = os.getenv('MISTRAL_API_KEY') or ocr_config.get('mistral_api_key')
-            ocr_config['openai_api_key'] = os.getenv('OPENAI_API_KEY') or ocr_config.get('openai_api_key')
-            ocr_config['anthropic_api_key'] = os.getenv('ANTHROPIC_API_KEY') or ocr_config.get('anthropic_api_key')
+        # ENHANCED: Override provider API keys from environment
+        if config.get('llm', {}).get('providers'):
+            providers = config['llm']['providers']
 
-        # Update triple_extraction config with environment variables
-        if config.get('triple_extraction') and isinstance(config['triple_extraction'], dict):
-            config['triple_extraction']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config[
-                'triple_extraction'].get('api_key')
-            config['TRIPLE_EXTRACTION_API_KEY'] = config['triple_extraction']['api_key']
+            # Gemini provider
+            if 'gemini' in providers:
+                providers['gemini']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY') or \
+                                                 providers['gemini'].get('api_key')
 
-        # Update relationship_inference config with environment variables
-        if config.get('relationship_inference') and isinstance(config['relationship_inference'], dict):
-            config['relationship_inference']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or \
-                                                          config['relationship_inference'].get('api_key')
+            # OpenAI provider
+            if 'openai' in providers:
+                providers['openai']['api_key'] = os.getenv('OPENAI_API_KEY') or providers['openai'].get('api_key')
 
-        # Update within_community_inference config with environment variables
-        if config.get('within_community_inference') and isinstance(config['within_community_inference'], dict):
-            config['within_community_inference']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or \
-                                                              config['within_community_inference'].get('api_key')
+            # Anthropic provider
+            if 'anthropic' in providers:
+                providers['anthropic']['api_key'] = os.getenv('ANTHROPIC_API_KEY') or providers['anthropic'].get(
+                    'api_key')
 
-        # Update mistral config with environment variables
-        if config.get('mistral') and isinstance(config['mistral'], dict):
-            config['mistral']['api_key'] = os.getenv('MISTRAL_API_KEY') or config['mistral'].get('api_key')
+            # Mistral provider
+            if 'mistral' in providers:
+                providers['mistral']['api_key'] = os.getenv('MISTRAL_API_KEY') or providers['mistral'].get('api_key')
+
+        # Update task-specific configs with environment variables
+        for task_name in ['triple_extraction', 'relationship_inference', 'within_community_inference',
+                          'text_sanitization', 'cypher_correction']:
+            if config.get(task_name) and isinstance(config[task_name], dict):
+                task_config = config[task_name]
+                # Inherit from primary if not specified
+                if not task_config.get('api_key'):
+                    task_config['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config.get(
+                        'LLM_API_KEY')
+                # Set derived flat keys for backward compatibility
+                if task_name == 'triple_extraction':
+                    config['TRIPLE_EXTRACTION_API_KEY'] = task_config['api_key']
 
         # 3. Final Validation
         required_for_qa = ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD', 'LLM_MODEL', 'LLM_API_KEY', 'EMBEDDING_MODEL',
@@ -333,10 +545,15 @@ def load_config():
 
         logger.info("✅ Configuration loading complete with proper TOML structure preservation")
 
+        # ENHANCED: Log LLM provider status
+        if config.get('llm', {}).get('providers'):
+            llm_mgr = get_llm_config_manager(config)
+            available_providers = llm_mgr.get_available_providers()
+            primary_provider = config.get('llm', {}).get('primary_provider', 'gemini')
+            logger.info(f"🎯 LLM Configuration: Primary={primary_provider}, Available={available_providers}")
+
         # FIXED: Log configuration summary with masked sensitive data
         masked_config = get_masked_config_for_logging(config)
-        primary_method = config.get('llm', {}).get('ocr', {}).get('primary_method', 'unknown')
-        logger.info(f"🎯 OCR Primary Method from config: {primary_method}")
         logger.debug(
             f"Config Summary: LLM_MODEL={masked_config.get('LLM_MODEL')}, NEO4J_URI={masked_config.get('NEO4J_URI')}")
 
@@ -356,50 +573,59 @@ def get_requests_session():
     return session
 
 
+# ENHANCED: Updated correction LLM to use new system
 @st.cache_resource
 def get_correction_llm(config):
-    """Initializes and returns the LlamaIndex LLM needed for correction."""
-    # ADDED: Ensure .env is loaded
+    """Initializes and returns the LLM for correction using new provider system."""
     load_dotenv()
 
     if not config or not config.get('_CONFIG_VALID', False):
         logger.warning("Skipping correction LLM initialization: Invalid base config")
         return None
 
-    model_name = config.get('LLM_MODEL')
-    # UPDATED: Check environment variables first
-    api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config.get('LLM_API_KEY')
-
-    if not model_name or not api_key:
-        logger.warning("Correction LLM model/API key missing. Correction disabled")
-        return None
-
-    # FIXED: Mask API key in logs
-    masked_key = mask_sensitive_data(api_key)
-    logger.info(f"Initializing LlamaIndex LLM '{model_name}' for correction... (key: {masked_key})")
-
     try:
+        # Try to use the new multi-provider system
+        llm_manager = get_cypher_correction_llm(config)
+        if llm_manager:
+            logger.info("✅ Correction LLM initialized using new multi-provider system")
+            return llm_manager
+    except Exception as e:
+        logger.warning(f"Could not initialize correction LLM with new system: {e}")
+
+    # Fallback to legacy system for backward compatibility
+    try:
+        # Import after trying new system to avoid circular imports
+        from llama_index.llms.gemini import Gemini
+
+        model_name = config.get('LLM_MODEL')
+        api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config.get('LLM_API_KEY')
+
+        if not model_name or not api_key:
+            logger.warning("Correction LLM model/API key missing. Correction disabled")
+            return None
+
+        masked_key = mask_sensitive_data(api_key)
+        logger.info(f"Initializing legacy LlamaIndex LLM '{model_name}' for correction... (key: {masked_key})")
+
         if "gemini" in model_name.lower():
             llm = Gemini(model_name=model_name, api_key=api_key)
+            logger.info("✅ Legacy correction LLM initialized successfully")
+            return llm
         else:
             logger.error(f"Unsupported LLM provider for correction model: {model_name}")
-            llm = None
+            return None
 
-        if llm:
-            logger.info("Correction LLM initialized successfully")
-        return llm
     except ImportError as e:
-        logger.error(f"ImportError for LlamaIndex LLM class {model_name}: {e}")
+        logger.error(f"ImportError for LlamaIndex LLM class: {e}")
         return None
     except Exception as e:
-        logger.error(f"Failed to initialize LlamaIndex LLM for correction: {e}")
+        logger.error(f"Failed to initialize correction LLM: {e}")
         return None
 
 
 @st.cache_resource
 def get_mistral_client(api_key):
     """Initializes and returns a Mistral client."""
-    # ADDED: Ensure .env is loaded
     load_dotenv()
 
     # UPDATED: Check environment variable first if no API key provided
@@ -483,7 +709,6 @@ def get_chroma_collection(chroma_path, collection_name, embedding_model_name):
 @st.cache_resource
 def init_neo4j_exporter(uri, user, password):
     """Initializes and returns a Neo4jExporter instance."""
-    # ADDED: Ensure .env is loaded
     load_dotenv()
 
     # UPDATED: Check environment variables first if parameters not provided
@@ -511,10 +736,11 @@ def init_neo4j_exporter(uri, user, password):
         return None
 
 
+# ENHANCED: Updated QA engine to use new LLM system
 @st.cache_resource
 def load_qa_engine(config, _correction_llm):
-    """Initializes and returns the Enhanced GraphRAGQA engine."""
-    logger.info("Initializing Enhanced GraphRAGQA Engine resource...")
+    """Initializes and returns the Enhanced GraphRAGQA engine with multi-provider LLM support."""
+    logger.info("Initializing Enhanced GraphRAGQA Engine resource with multi-provider LLM support...")
     if not config or not config.get('_CONFIG_VALID', False):
         logger.error("Config invalid, cannot initialize Enhanced GraphRAGQA engine")
         return None
@@ -524,36 +750,56 @@ def load_qa_engine(config, _correction_llm):
         universal_config = config.get('universal', {})
         query_config = config.get('query_engine', {})
 
+        # Get LLM configuration manager for the QA engine
+        try:
+            llm_config_manager = get_llm_config_manager(config)
+
+            # Create primary LLM for QA (could be different from correction LLM)
+            primary_provider = config.get('llm', {}).get('primary_provider', 'gemini')
+            qa_llm_manager = llm_config_manager.get_llm_manager('llm')  # Uses primary LLM config
+
+            logger.info(f"QA Engine using primary LLM provider: {primary_provider}")
+
+        except Exception as llm_e:
+            logger.warning(f"Could not initialize new LLM system for QA engine: {llm_e}, falling back to legacy")
+            qa_llm_manager = None
+
         # Mask sensitive data for logging
         masked_password = mask_sensitive_data(config['NEO4J_PASSWORD'])
         masked_api_key = mask_sensitive_data(config['LLM_API_KEY'])
         logger.info(
             f"Initializing Enhanced QA engine with Neo4j password: {masked_password}, LLM key: {masked_api_key}")
 
-        # UPDATED: Use EnhancedGraphRAGQA instead of GraphRAGQA
-        engine = EnhancedGraphRAGQA(
+        # UPDATED: Use EnhancedGraphRAGQA with optional new LLM system
+        engine_params = {
             # Your existing parameters (unchanged)
-            neo4j_uri=config['NEO4J_URI'],
-            neo4j_user=config['NEO4J_USER'],
-            neo4j_password=config['NEO4J_PASSWORD'],
-            llm_instance_for_correction=_correction_llm,
-            llm_model=config['LLM_MODEL'],
-            llm_api_key=config['LLM_API_KEY'],
-            llm_base_url=config.get('LLM_BASE_URL'),
-            embedding_model_name=config['EMBEDDING_MODEL'],
-            chroma_path=config['CHROMA_PERSIST_PATH'],
-            collection_name=config['COLLECTION_NAME'],
-            db_name=config['DB_NAME'],
-            llm_config_extra=config.get('LLM_EXTRA_PARAMS', {}),
-            max_cypher_retries=config.get('max_cypher_retries', 2),
+            'neo4j_uri': config['NEO4J_URI'],
+            'neo4j_user': config['NEO4J_USER'],
+            'neo4j_password': config['NEO4J_PASSWORD'],
+            'llm_instance_for_correction': _correction_llm,
+            'llm_model': config['LLM_MODEL'],
+            'llm_api_key': config['LLM_API_KEY'],
+            'llm_base_url': config.get('LLM_BASE_URL'),
+            'embedding_model_name': config['EMBEDDING_MODEL'],
+            'chroma_path': config['CHROMA_PERSIST_PATH'],
+            'collection_name': config['COLLECTION_NAME'],
+            'db_name': config['DB_NAME'],
+            'llm_config_extra': config.get('LLM_EXTRA_PARAMS', {}),
+            'max_cypher_retries': config.get('max_cypher_retries', 2),
 
             # NEW ENHANCED PARAMETERS
-            enable_universal_patterns=universal_config.get('enable_universal_patterns', True),
-            manual_industry=universal_config.get('manual_industry', None),
-            pattern_confidence_threshold=universal_config.get('confidence_threshold', 0.6),
-            fuzzy_threshold=query_config.get('entity_linking_fuzzy_threshold', 70),
-            enable_query_caching=query_config.get('enable_query_caching', True)
-        )
+            'enable_universal_patterns': universal_config.get('enable_universal_patterns', True),
+            'manual_industry': universal_config.get('manual_industry', None),
+            'pattern_confidence_threshold': universal_config.get('confidence_threshold', 0.6),
+            'fuzzy_threshold': query_config.get('entity_linking_fuzzy_threshold', 70),
+            'enable_query_caching': query_config.get('enable_query_caching', True)
+        }
+
+        # ENHANCED: Add LLM manager if available
+        if qa_llm_manager:
+            engine_params['llm_manager'] = qa_llm_manager
+
+        engine = EnhancedGraphRAGQA(**engine_params)
 
         logger.info(f"Enhanced GraphRAGQA Engine resource initialized. Ready: {engine.is_ready()}")
 
@@ -580,7 +826,6 @@ def load_qa_engine(config, _correction_llm):
 @st.cache_resource
 def get_nlp_pipeline(config):
     """Loads and returns a spaCy NLP pipeline."""
-
     # FIXED: Use consistent config key names
     coreference_enabled = config.get('COREFERENCE_RESOLUTION_ENABLED', False)
 
@@ -603,6 +848,75 @@ def get_nlp_pipeline(config):
     except Exception as e:
         logger.error(f"Error loading spaCy NLP pipeline '{model_name}': {e}")
         return None
+
+
+# ENHANCED: New function to show LLM provider status
+def show_llm_provider_status(config):
+    """Display current LLM provider configuration and status."""
+    try:
+        llm_config_manager = get_llm_config_manager(config)
+
+        # Get provider information
+        available_providers = llm_config_manager.get_available_providers()
+        primary_provider = config.get('llm', {}).get('primary_provider', 'gemini')
+        fallback_provider = config.get('llm', {}).get('fallback_provider', 'openai')
+
+        st.markdown("### 🤖 LLM Provider Status")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("**Primary Provider**")
+            if primary_provider in available_providers:
+                st.success(f"✅ {primary_provider.title()}")
+            else:
+                st.error(f"❌ {primary_provider.title()} (Not Available)")
+
+        with col2:
+            st.markdown("**Fallback Provider**")
+            if fallback_provider in available_providers:
+                st.success(f"✅ {fallback_provider.title()}")
+            else:
+                st.warning(f"⚠️ {fallback_provider.title()} (Not Available)")
+
+        with col3:
+            st.markdown("**Available Providers**")
+            st.info(f"🎯 {len(available_providers)} providers ready")
+
+        # Show detailed provider status
+        if st.expander("📋 Detailed Provider Status", expanded=False):
+            providers_config = config.get('llm', {}).get('providers', {})
+
+            for provider_name, provider_config in providers_config.items():
+                enabled = provider_config.get('enabled', False)
+                model = provider_config.get('model', 'Unknown')
+
+                # Check if API key is available
+                api_key_available = False
+                if provider_name == 'gemini':
+                    api_key_available = bool(os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY'))
+                elif provider_name == 'openai':
+                    api_key_available = bool(os.getenv('OPENAI_API_KEY'))
+                elif provider_name == 'anthropic':
+                    api_key_available = bool(os.getenv('ANTHROPIC_API_KEY'))
+                elif provider_name == 'mistral':
+                    api_key_available = bool(os.getenv('MISTRAL_API_KEY'))
+                elif provider_name == 'ollama':
+                    api_key_available = True  # Local model
+
+                status_icon = "✅" if (enabled and api_key_available) else "❌"
+                st.markdown(
+                    f"{status_icon} **{provider_name.title()}**: {model} {'(Enabled)' if enabled else '(Disabled)'}")
+
+                if enabled and not api_key_available:
+                    st.warning(f"⚠️ API key missing for {provider_name}")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Error showing LLM provider status: {e}")
+        st.error(f"❌ Could not load LLM provider status: {e}")
+        return False
 
 
 def process_documents_batch(uploaded_files, enhanced_ocr_pipeline, save_to_disk=True):
@@ -658,7 +972,7 @@ def process_documents_batch(uploaded_files, enhanced_ocr_pipeline, save_to_disk=
 
 
 def main():
-    """Sets up the main app configuration and landing page."""
+    """Sets up the main app configuration and landing page with enhanced LLM status."""
 
     # ADDED: Load .env file first
     load_dotenv()
@@ -671,6 +985,9 @@ def main():
     if not config or not config.get('_CONFIG_VALID', False):
         logger.critical("Halting app start due to invalid configuration")
         st.stop()
+
+    # ENHANCED: Show LLM provider status
+    show_llm_provider_status(config)
 
     # Initialize Audit Database
     try:
@@ -706,9 +1023,9 @@ def main():
     * Use **Data Extraction Validation** to monitor AI extraction quality and performance metrics.
     * Use **Processed Files Manager** to browse and manage your document archive.
 
-    **LLM OCR Methods**: Supports Gemini 1.5 Flash, Mistral Pixtral, GPT-4o Vision, and Claude 3.5 Sonnet for document text extraction.
+    **Enhanced Multi-Provider LLM Support**: Configure any combination of Gemini, OpenAI, Claude, Mistral, or local Ollama models with automatic fallback support.
 
-    **Security Note**: All API keys and passwords are automatically masked in application logs for security.
+    **Security Note**: All API keys and passwords are automatically loaded from .env file and masked in application logs for security.
     """)
 
 

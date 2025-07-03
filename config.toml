@@ -1,76 +1,217 @@
-# config.toml - LLM OCR ONLY CONFIGURATION
-# Centralized configuration with security fixes and EasyOCR removed
+# config.toml - ENHANCED MULTI-PROVIDER LLM CONFIGURATION
+# Centralized configuration with multi-provider support and backward compatibility
+
+# =============================================================================
+# MULTI-PROVIDER LLM CONFIGURATION
+# =============================================================================
 
 [llm]
-    # PRIMARY LLM CONFIGURATION - Used for all LLM operations unless overridden
+    # GLOBAL LLM SETTINGS
+    primary_provider = "gemini"           # Primary LLM provider to use
+    fallback_provider = "openai"          # Fallback if primary fails
+    enable_fallback = true                # Enable/disable fallback mechanism
+    retry_attempts = 2                    # Number of retry attempts per provider
+    timeout_seconds = 60                  # Default timeout for LLM calls
+
+    # BACKWARD COMPATIBILITY - These will be used if provider-specific config not found
     model = "gemini-1.5-flash-latest"
-    api_key = ""
+    api_key = ""                          # Will be overridden by environment variables
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 2000
     temperature = 0.1
 
-    [llm.ocr]
-        # LLM OCR API KEYS - Multiple providers for redundancy
-        mistral_api_key = ""
-        gemini_api_key = ""
-        openai_api_key = ""
-        anthropic_api_key = ""
+    # PROVIDER-SPECIFIC CONFIGURATIONS
+    [llm.providers]
 
-        # LLM OCR Configuration - ACTIVELY USED by enhanced_ocr_pipeline.py
-        primary_method = "gemini"
-        fallback_enabled = true
-        confidence_threshold = 0.7
-        timeout_seconds = 60
-        max_retries = 2
-
-        [llm.ocr.gemini]
-            model = "gemini-1.5-flash"
+        [llm.providers.gemini]
+            enabled = true
+            model = "gemini-1.5-flash-latest"
+            api_key = ""                  # Will use GOOGLE_API_KEY or GEMINI_API_KEY from .env
+            base_url = "https://generativelanguage.googleapis.com/v1beta/models"
             max_tokens = 4000
             temperature = 0.1
+            timeout = 60
+            # Gemini-specific parameters
+            safety_settings = "default"
+            generation_config = {}
 
-        [llm.ocr.openai]
-            model = "gpt-4o"
+        [llm.providers.openai]
+            enabled = true
+            model = "gpt-4"
+            api_key = ""                  # Will use OPENAI_API_KEY from .env
+            base_url = "https://api.openai.com/v1/chat/completions"
             max_tokens = 4000
             temperature = 0.1
+            timeout = 60
+            # OpenAI-specific parameters
+            frequency_penalty = 0.0
+            presence_penalty = 0.0
+            top_p = 1.0
 
-        [llm.ocr.claude]
+        [llm.providers.anthropic]
+            enabled = true
             model = "claude-3-5-sonnet-20241022"
+            api_key = ""                  # Will use ANTHROPIC_API_KEY from .env
+            base_url = "https://api.anthropic.com/v1/messages"
             max_tokens = 4000
             temperature = 0.1
+            timeout = 60
+            # Anthropic-specific parameters
+            anthropic_version = "2023-06-01"
 
-        [llm.ocr.mistral]
-            model = "pixtral-12b-2409"
+        [llm.providers.mistral]
+            enabled = true
+            model = "mistral-large-latest"
+            api_key = ""                  # Will use MISTRAL_API_KEY from .env
+            base_url = "https://api.mistral.ai/v1/chat/completions"
             max_tokens = 4000
             temperature = 0.1
+            timeout = 60
+            # Mistral-specific parameters
+            safe_prompt = false
+
+        [llm.providers.ollama]
+            enabled = false               # Disabled by default (local setup required)
+            model = "llama2"
+            api_key = "local"            # Not needed for local Ollama
+            base_url = "http://localhost:11434/v1/chat/completions"
+            max_tokens = 4000
+            temperature = 0.1
+            timeout = 120                # Longer timeout for local models
+            # Ollama-specific parameters
+            num_predict = 4000
+            top_k = 40
+            top_p = 0.9
+
+    # LLM OCR CONFIGURATION (Enhanced for multi-provider)
+    [llm.ocr]
+        primary_method = "gemini"         # Primary OCR method
+        fallback_enabled = true           # Enable OCR fallback
+        confidence_threshold = 0.7        # Minimum confidence threshold
+        timeout_seconds = 60              # OCR-specific timeout
+        max_retries = 2                   # OCR-specific retries
+
+        # Provider-specific OCR configurations
+        [llm.ocr.providers]
+
+            [llm.ocr.providers.gemini]
+                enabled = true
+                model = "gemini-1.5-flash"
+                api_key = ""              # Will use GOOGLE_API_KEY from .env
+                max_tokens = 4000
+                temperature = 0.1
+
+            [llm.ocr.providers.openai]
+                enabled = true
+                model = "gpt-4o"
+                api_key = ""              # Will use OPENAI_API_KEY from .env
+                max_tokens = 4000
+                temperature = 0.1
+
+            [llm.ocr.providers.claude]
+                enabled = true
+                model = "claude-3-5-sonnet-20241022"
+                api_key = ""              # Will use ANTHROPIC_API_KEY from .env
+                max_tokens = 4000
+                temperature = 0.1
+
+            [llm.ocr.providers.mistral]
+                enabled = true
+                model = "pixtral-12b-2409"
+                api_key = ""              # Will use MISTRAL_API_KEY from .env
+                max_tokens = 4000
+                temperature = 0.1
+
+# =============================================================================
+# SPECIFIC LLM TASK CONFIGURATIONS
+# =============================================================================
 
 [triple_extraction]
-    # ACTIVELY USED by processing_pipeline.py and entity_standardization.py
-    model = "gemini-1.5-flash-latest"
-    api_key = ""
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    # Can use different provider for triple extraction
+    provider = "gemini"                   # Provider to use (falls back to primary if not specified)
+    model = "gemini-1.5-flash-latest"    # Model override (optional)
+    api_key = ""                          # Will inherit from provider config
+    base_url = ""                         # Will inherit from provider config
     max_tokens = 2000
     temperature = 0.1
+    # Task-specific parameters
+    extraction_mode = "comprehensive"
+    include_confidence = true
 
 [relationship_inference]
-    # ACTIVELY USED by entity_standardization.py
+    provider = "gemini"                   # Provider for relationship inference
     enabled = true
     model = "gemini-1.5-flash-latest"
     api_key = ""
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    base_url = ""
     max_tokens = 1500
     temperature = 0.1
+    # Task-specific parameters
+    inference_threshold = 0.7
+    max_relationships_per_call = 10
 
 [within_community_inference]
-    # ACTIVELY USED by entity_standardization.py
+    provider = "gemini"                   # Provider for community inference
     enabled = true
     model = "gemini-1.5-flash-latest"
     api_key = ""
-    base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+    base_url = ""
     max_tokens = 1000
     temperature = 0.1
+    # Task-specific parameters
+    community_size_threshold = 5
+    max_inferences_per_community = 3
+
+[text_sanitization]
+    provider = "gemini"                   # Provider for text sanitization
+    enabled = true
+    model = "gemini-1.5-flash-latest"
+    max_tokens = 4000
+    temperature = 0.1
+    # Sanitization-specific parameters
+    sanitization_level = "moderate"
+    preserve_structure = true
+    remove_personal_info = false
+
+[cypher_correction]
+    provider = "gemini"                   # Provider for Cypher query correction
+    enabled = true
+    model = "gemini-1.5-flash-latest"
+    max_tokens = 1000
+    temperature = 0.0                     # Very low temperature for precise corrections
+    # Correction-specific parameters
+    max_correction_attempts = 3
+    validate_syntax = true
+
+# =============================================================================
+# PROVIDER USAGE POLICIES
+# =============================================================================
+
+[provider_policies]
+    # Cost management
+    enable_cost_tracking = true
+    daily_cost_limit = 50.0              # USD
+    monthly_cost_limit = 1000.0          # USD
+
+    # Usage priorities by task type
+    [provider_policies.task_priorities]
+        ocr = ["gemini", "openai", "claude", "mistral"]
+        triple_extraction = ["gemini", "openai", "mistral", "claude"]
+        inference = ["gemini", "openai", "claude", "mistral"]
+        correction = ["gemini", "openai", "claude", "mistral"]
+
+    # Fallback chains
+    [provider_policies.fallback_chains]
+        gemini = ["openai", "claude"]
+        openai = ["gemini", "claude"]
+        claude = ["gemini", "openai"]
+        mistral = ["gemini", "openai"]
+
+# =============================================================================
+# EXISTING CONFIGURATIONS (Maintained for backward compatibility)
+# =============================================================================
 
 [inference]
-    # ACTIVELY USED by entity_standardization.py
     enabled = true
     llm_max_community_pairs = 5
     llm_communities_to_consider = 3
@@ -78,28 +219,23 @@
     llm_max_pairs_per_community = 5
 
 [neo4j]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and neo4j_exporter.py
     uri = "bolt://localhost:7687"
     user = "neo4j"
     password = ""
     database = "neo4j"
 
 [vector_db]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and vector_embedding_storage.py
     persist_directory = "./chroma_db_pipeline"
     collection_name = "doc_pipeline_embeddings"
 
 [embeddings]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py
     model_name = "all-MiniLM-L6-v2"
 
 [chunking]
-    # ACTIVELY USED by processing_pipeline.py
     chunk_size = 1000
     overlap = 100
 
 [standardization]
-    # ACTIVELY USED by entity_standardization.py
     enabled = true
     debug_logging = false
     max_merge_attempts = 100
@@ -263,12 +399,10 @@
     "l" = "Liters"
 
 [nlp]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and processing_pipeline.py
     coreference_resolution_enabled = false
     spacy_model_name = "en_core_web_trf"
 
 [performance]
-    # ACTIVELY USED by processing_pipeline.py
     max_workers = 2
     batch_size = 1
     memory_limit_mb = 4096
@@ -276,7 +410,6 @@
     cache_ttl_hours = 24
 
 [logging]
-    # ACTIVELY USED by multiple modules for logging configuration
     level = "INFO"
     mask_api_keys = true
     mask_passwords = true
@@ -287,20 +420,20 @@
     [logging.loggers]
     "src.knowledge_graph.entity_standardization" = "WARNING"
     "src.utils.ocr_storage" = "INFO"
+    "llm" = "INFO"                        # Logging level for LLM operations
+    "llm.providers" = "DEBUG"             # Detailed provider logging
 
+# BACKWARD COMPATIBILITY SECTIONS (Maintained as-is)
 [mistral]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py for backward compatibility
     api_key = ""
     model = "pixtral-12b-2409"
     timeout = 30
 
 [caching]
-    # ACTIVELY USED by processing_pipeline.py
     enabled = true
     cache_ttl_hours = 24
 
 [pipeline]
-    # ACTIVELY USED by processing_pipeline.py
     standardization_enabled = true
     inference_enabled = true
     cache_enabled = true
@@ -311,10 +444,8 @@
     concurrent_file_limit = 1
 
 [database]
-    # ACTIVELY USED by GraphRAG_Document_AI_Platform.py
     name = "neo4j"
 
-# ENHANCED METADATA CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py
 [metadata]
     extract_entities = true
     classify_documents = true
@@ -334,7 +465,6 @@
     enable_complexity_analysis = true
     enable_issue_detection = true
 
-# FILE PROCESSING CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py
 [file_processing]
     supported_types = ["application/pdf", "image/png", "image/jpeg", "image/jpg", "text/plain", "text/csv", "text/html", "text/xml"]
     pdf_dpi = 200
@@ -345,7 +475,6 @@
     handle_text_files_directly = true
     text_encoding_fallback = ["utf-8", "latin-1", "cp1252", "ascii"]
 
-# STORAGE CONFIGURATION - ACTIVELY USED by enhanced_ocr_pipeline.py and ocr_storage.py
 [storage]
     enable_ocr_storage = true
     storage_directory = "./ocr_outputs"
@@ -357,25 +486,15 @@
     enable_zip_export = true
 
 [universal]
-    # Universal Industry Support
     enable_universal_patterns = true
-
-    # Manual industry override (optional)
-    # Options: oil_gas, manufacturing, healthcare, logistics, utilities, construction, generic
-    # Leave empty for auto-detection
     manual_industry = ""
-
-    # Industry detection settings
     auto_detect_industry = true
     confidence_threshold = 0.6
-
-    # Pattern adaptation settings
     adapt_to_schema = true
     use_domain_keywords = true
     learn_from_data = true
 
 [query_engine]
-    # Enhanced Cypher Generation Settings (if not already present)
     enable_advanced_cypher = true
     pattern_confidence_threshold = 0.6
     hybrid_mode = true
@@ -384,14 +503,12 @@
     max_cypher_retries = 2
 
 [pattern_library]
-    # Universal pattern settings
     use_universal_patterns = true
     fallback_to_base_patterns = true
     pattern_confidence_threshold = 0.5
     max_patterns_per_category = 3
 
 [analytics]
-    # Performance Tracking (if not already present)
     track_generation_stats = true
     store_successful_patterns = true
     enable_few_shot_learning = true

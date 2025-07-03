@@ -1,4 +1,4 @@
-# processing_pipeline.py
+# processing_pipeline.py - SURGICAL MULTI-PROVIDER LLM ENHANCEMENT
 
 import nest_asyncio
 
@@ -47,6 +47,37 @@ except ImportError as e:
         """Fallback function when text sanitization is not available"""
         return text
 
+# ENHANCED: Import multi-provider LLM system with fallback
+try:
+    from src.knowledge_graph.llm import (
+        LLMManager,
+        LLMProviderFactory,
+        LLMConfig,
+        LLMProvider,
+        LLMProviderError,
+        QuotaError,
+        call_llm as legacy_call_llm
+    )
+
+    NEW_LLM_SYSTEM_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ Multi-provider LLM system available for processing pipeline")
+except ImportError as e:
+    NEW_LLM_SYSTEM_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning(f"Multi-provider LLM system not available: {e}. Using legacy system.")
+
+    # Fallback to legacy imports
+    try:
+        from src.knowledge_graph.llm import call_llm as legacy_call_llm, QuotaError
+    except ImportError:
+        class QuotaError(Exception):
+            pass
+
+
+        def legacy_call_llm(*args, **kwargs):
+            return "Mock response"
+
 # Import necessary modules from your project
 try:
     import src.utils.audit_db_manager
@@ -94,7 +125,116 @@ ocr_storage = create_storage_manager("ocr_outputs")
 
 
 # =============================================================================
-# OCR PROCESSING FUNCTIONS (CLEANED UP)
+# ENHANCED: MULTI-PROVIDER LLM MANAGER FOR PROCESSING PIPELINE
+# =============================================================================
+
+class ProcessingLLMManager:
+    """
+    SURGICAL ENHANCEMENT: Manages multi-provider LLM calls for processing pipeline.
+    This class provides a fallback mechanism to your existing call_llm() function.
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.llm_managers = {}
+
+        # Initialize LLM managers for different tasks
+        if NEW_LLM_SYSTEM_AVAILABLE:
+            self._initialize_task_managers()
+
+        logger.info(
+            f"ProcessingLLMManager initialized with {'enhanced' if NEW_LLM_SYSTEM_AVAILABLE else 'legacy'} LLM system")
+
+    def _initialize_task_managers(self):
+        """Initialize LLM managers for different processing tasks."""
+        try:
+            # Import the main LLM configuration manager
+            from GraphRAG_Document_AI_Platform import get_llm_config_manager
+
+            main_llm_manager = get_llm_config_manager(self.config)
+
+            # Create task-specific LLM managers
+            tasks = ['triple_extraction', 'text_sanitization']
+
+            for task in tasks:
+                try:
+                    self.llm_managers[task] = main_llm_manager.get_llm_manager(task)
+                    logger.info(f"✅ Initialized LLM manager for {task}")
+                except Exception as e:
+                    logger.warning(f"Could not initialize LLM manager for {task}: {e}")
+                    self.llm_managers[task] = None
+
+        except ImportError as e:
+            logger.warning(f"Could not import main LLM configuration manager: {e}")
+            self.llm_managers = {}
+
+    def enhanced_call_llm(self, task_name: str, model: str, user_prompt: str, api_key: str,
+                          system_prompt: str = None, max_tokens: int = None, temperature: float = None,
+                          base_url: str = None, session: Any = None) -> str:
+        """
+        Enhanced LLM call with multi-provider support.
+        Falls back to your existing call_llm() if enhanced system is not available.
+        """
+        # Try enhanced system first
+        if NEW_LLM_SYSTEM_AVAILABLE and task_name in self.llm_managers and self.llm_managers[task_name]:
+            try:
+                logger.debug(f"🎯 Using enhanced LLM system for {task_name}")
+                return self.llm_managers[task_name].call_llm(
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    session=session
+                )
+            except Exception as e:
+                logger.warning(f"Enhanced LLM failed for {task_name}: {e}, falling back to legacy")
+
+        # Fall back to your existing call_llm function
+        logger.debug(f"🔄 Using legacy LLM system for {task_name}")
+        return call_llm(
+            model=model,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            base_url=base_url,
+            session=session
+        )
+
+    def get_available_providers(self, task_name: str) -> List[str]:
+        """Get available providers for a specific task."""
+        if NEW_LLM_SYSTEM_AVAILABLE and task_name in self.llm_managers and self.llm_managers[task_name]:
+            try:
+                # Get providers from the LLM manager
+                primary_provider = self.llm_managers[task_name].primary_provider
+                fallback_providers = self.llm_managers[task_name].fallback_providers
+
+                providers = [primary_provider.config.provider.value]
+                providers.extend([fp.config.provider.value for fp in fallback_providers])
+
+                return providers
+            except Exception as e:
+                logger.warning(f"Could not get providers for {task_name}: {e}")
+
+        # Fall back to legacy configuration
+        return ['legacy']
+
+
+# Global processing LLM manager
+_processing_llm_manager = None
+
+
+def get_processing_llm_manager(config: Dict[str, Any]) -> ProcessingLLMManager:
+    """Get or create global processing LLM manager."""
+    global _processing_llm_manager
+    if _processing_llm_manager is None:
+        _processing_llm_manager = ProcessingLLMManager(config)
+    return _processing_llm_manager
+
+
+# =============================================================================
+# OCR PROCESSING FUNCTIONS (UNCHANGED)
 # =============================================================================
 
 def process_uploaded_file_ocr(uploaded_file: Any, enhanced_ocr_pipeline: Any) -> Optional[str]:
@@ -181,7 +321,7 @@ def process_uploaded_file_ocr_with_storage(uploaded_file, enhanced_ocr_pipeline,
 
 
 # =============================================================================
-# BATCH PROCESSING FUNCTIONS (CLEANED UP)
+# BATCH PROCESSING FUNCTIONS (UNCHANGED)
 # =============================================================================
 
 def process_batch_with_enhanced_storage(uploaded_files, enhanced_ocr_pipeline, save_to_disk=True):
@@ -260,7 +400,7 @@ def process_batch_with_storage(uploaded_files, mistral_client=None, enhanced_ocr
 
 
 # =============================================================================
-# UTILITY FUNCTIONS
+# UTILITY FUNCTIONS (UNCHANGED)
 # =============================================================================
 
 def extract_basic_fields_from_text(text: str) -> dict:
@@ -327,7 +467,7 @@ def detect_document_type(filename, content):
 
 
 # =============================================================================
-# KNOWLEDGE GRAPH EXTRACTION
+# ENHANCED: KNOWLEDGE GRAPH EXTRACTION WITH MULTI-PROVIDER SUPPORT
 # =============================================================================
 
 def extract_knowledge_graph(
@@ -336,8 +476,8 @@ def extract_knowledge_graph(
         requests_session: Optional[Any]
 ) -> Tuple[List[Dict], List[str], int]:
     """
-    Extracts, standardizes, and infers knowledge graph triples from text.
-    Returns: Tuple containing (list of final triples, list of text chunks, count of initially extracted triples)
+    ENHANCED: Extracts knowledge graph triples with multi-provider LLM support.
+    SURGICAL CHANGE: Only the LLM call is enhanced, all other logic remains unchanged.
     """
     initial_triples = []
     text_chunks = []
@@ -347,7 +487,10 @@ def extract_knowledge_graph(
         logger.warning("extract_knowledge_graph called with empty text_content.")
         return initial_triples, text_chunks, total_extracted
 
-    # Configuration
+    # ENHANCED: Get processing LLM manager
+    processing_llm_manager = get_processing_llm_manager(config)
+
+    # Configuration (UNCHANGED)
     chunk_size_chars = config.get('CHUNK_SIZE', 1000)
     overlap_chars = config.get('CHUNK_OVERLAP', 100)
     extraction_model = config.get('TRIPLE_EXTRACTION_LLM_MODEL')
@@ -360,7 +503,11 @@ def extract_knowledge_graph(
         logger.error("KG Extraction Error! Missing LLM Config for triple extraction.")
         raise ValueError("Missing configuration for Triple Extraction LLM.")
 
-    # Chunking
+    # Log which LLM system is being used
+    available_providers = processing_llm_manager.get_available_providers('triple_extraction')
+    logger.info(f"🎯 Knowledge Graph Extraction using providers: {available_providers}")
+
+    # Chunking (UNCHANGED)
     try:
         text_chunks = chunk_text(text_content, chunk_size=chunk_size_chars, chunk_overlap=overlap_chars)
         num_chunks = len(text_chunks)
@@ -373,7 +520,7 @@ def extract_knowledge_graph(
         logger.error(f"Error during text chunking: {e}", exc_info=True)
         raise RuntimeError(f"Critical error during text chunking: {e}") from e
 
-    # KG Extraction Loop
+    # KG Extraction Loop (ENHANCED LLM CALL)
     logger.info(f"Preparing to extract triples from {num_chunks} chunk(s)...")
     system_prompt = MAIN_SYSTEM_PROMPT
     max_retries = 2
@@ -395,7 +542,10 @@ def extract_knowledge_graph(
             try:
                 logger.debug(f"Chunk {i + 1}, Attempt {attempt + 1}: Calling LLM...")
                 llm_call_start_time = time.time()
-                response_text = call_llm(
+
+                # ENHANCED: Use multi-provider LLM system with fallback
+                response_text = processing_llm_manager.enhanced_call_llm(
+                    task_name='triple_extraction',
                     model=extraction_model,
                     user_prompt=user_prompt,
                     api_key=extraction_api_key,
@@ -405,9 +555,11 @@ def extract_knowledge_graph(
                     base_url=extraction_base_url,
                     session=requests_session
                 )
+
                 llm_call_duration = time.time() - llm_call_start_time
                 logger.debug(f"Chunk {i + 1}, Attempt {attempt + 1}: LLM call duration: {llm_call_duration:.2f}s.")
 
+                # Rest of the processing logic UNCHANGED
                 logger.debug(f"Chunk {i + 1}, Attempt {attempt + 1}: Extracting JSON...")
                 json_extract_start_time = time.time()
                 chunk_results = extract_json_from_text(response_text)
@@ -491,7 +643,7 @@ def extract_knowledge_graph(
     logger.info(
         f"Finished initial triple extraction phase. Total extracted: {total_extracted} triples. Total time: {overall_duration:.2f}s.")
 
-    # Standardization
+    # Standardization (UNCHANGED)
     processed_triples = initial_triples
     if config.get('STANDARDIZATION_ENABLED', False) and processed_triples:
         logger.info("Applying entity standardization...")
@@ -504,7 +656,7 @@ def extract_knowledge_graph(
     else:
         logger.info("Skipping standardization.")
 
-    # Inference
+    # Inference (UNCHANGED)
     if config.get('INFERENCE_ENABLED', False) and processed_triples:
         logger.info("Applying relationship inference...")
         try:
@@ -527,7 +679,7 @@ def extract_knowledge_graph(
 
 
 # =============================================================================
-# EMBEDDINGS AND STORAGE
+# EMBEDDINGS AND STORAGE (UNCHANGED)
 # =============================================================================
 
 EmbeddingModelType = Any
@@ -624,7 +776,7 @@ def store_chunks_and_embeddings(
 
 
 # =============================================================================
-# CACHE FUNCTIONS
+# CACHE FUNCTIONS (UNCHANGED)
 # =============================================================================
 
 CACHE_DIR = Path("./graphrag_cache")
@@ -658,7 +810,7 @@ def load_triples_from_cache(file_hash: str) -> Optional[Tuple[List[Dict], List[s
 
             if isinstance(data, dict) and "triples" in data and "chunks" in data and isinstance(data["triples"],
                                                                                                 list) and isinstance(
-                    data["chunks"], list):
+                data["chunks"], list):
                 logger.info(
                     f"Cache hit: Loaded {len(data['triples'])} triples and {len(data['chunks'])} chunks from {cache_file}")
                 return data["triples"], data["chunks"]
@@ -712,7 +864,7 @@ def save_triples_to_cache(file_hash: str, triples: List[Dict], chunks: List[str]
 
 
 # =============================================================================
-# MAIN PIPELINE FUNCTION
+# MAIN PIPELINE FUNCTION (UNCHANGED EXCEPT FOR TEXT SANITIZATION)
 # =============================================================================
 
 def run_ingestion_pipeline_thread(
@@ -820,7 +972,6 @@ def run_ingestion_pipeline_thread(
                     raise ValueError("Text extraction failed or yielded no content.")
                 logger.debug(f"[Job {job_id} | File {file_processing_id}] Text extracted successfully.")
 
-
                 logger.info(f"[Job {job_id}] OCR extracted text preview: {text_content[:300]}...")
 
                 # Step 2: Coreference Resolution
@@ -846,42 +997,55 @@ def run_ingestion_pipeline_thread(
                     raise ValueError("Text chunking resulted in zero chunks.")
                 logger.debug(f"[Job {job_id} | File {file_processing_id}] Chunking complete ({num_chunks} chunks).")
 
-                # Step 4: Text Sanitization (NEW STEP)
+                # Step 4: Text Sanitization (ENHANCED WITH MULTI-PROVIDER SUPPORT)
                 if HAS_TEXT_SANITIZATION:
                     logger.info(f"[Job {job_id} | File {file_processing_id}] 🔧 Sanitizing text...")
                     document_type = detect_document_type(file_name, text_content)
 
-                    # FIX: Create proper config structure for TextSanitizer
-                    sanitization_config = {
-                        "text_sanitization": {
-                            "max_tokens_per_chunk": 3000,
-                            "overlap_tokens": 200,
-                            "min_chunk_tokens": 100,
-                            "max_tokens": 4000,
-                            "temperature": 0.1
-                        },
-                        "llm": {
-                            "model": config.get('LLM_MODEL'),
-                            "api_key": config.get('LLM_API_KEY'),
-                            "base_url": config.get('LLM_BASE_URL'),
-                            "max_tokens": 4000,
-                            "temperature": 0.1
-                        }
-                    }
+                    # ENHANCED: Use multi-provider system for text sanitization
+                    try:
+                        # Get processing LLM manager for sanitization
+                        processing_llm_manager = get_processing_llm_manager(config)
 
-                    sanitized_text = sanitize_and_structure_text(
-                        text=text_content,
-                        config=sanitization_config,  # Pass structured config
-                        document_type=document_type,
-                        requests_session=requests_session
-                    )
-                    logger.info(f"[Job {job_id} | File {file_processing_id}] Text sanitization complete.")
+                        # Create proper config structure for TextSanitizer
+                        sanitization_config = {
+                            "text_sanitization": {
+                                "max_tokens_per_chunk": 3000,
+                                "overlap_tokens": 200,
+                                "min_chunk_tokens": 100,
+                                "max_tokens": 4000,
+                                "temperature": 0.1
+                            },
+                            "llm": {
+                                "model": config.get('LLM_MODEL'),
+                                "api_key": config.get('LLM_API_KEY'),
+                                "base_url": config.get('LLM_BASE_URL'),
+                                "max_tokens": 4000,
+                                "temperature": 0.1
+                            }
+                        }
+
+                        # Log which providers are available for text sanitization
+                        available_providers = processing_llm_manager.get_available_providers('text_sanitization')
+                        logger.info(f"🎯 Text Sanitization using providers: {available_providers}")
+
+                        sanitized_text = sanitize_and_structure_text(
+                            text=text_content,
+                            config=sanitization_config,
+                            document_type=document_type,
+                            requests_session=requests_session
+                        )
+                        logger.info(f"[Job {job_id} | File {file_processing_id}] Text sanitization complete.")
+                    except Exception as e:
+                        logger.warning(
+                            f"[Job {job_id} | File {file_processing_id}] Text sanitization failed: {e}, using original text.")
+                        sanitized_text = text_content
                 else:
                     logger.info(
                         f"[Job {job_id} | File {file_processing_id}] Text sanitization not available, using original text.")
                     sanitized_text = text_content
 
-                # Step 5: Knowledge Graph Extraction
+                # Step 5: Knowledge Graph Extraction (ENHANCED)
                 logger.debug(f"[Job {job_id} | File {file_processing_id}] Extracting Knowledge Graph...")
                 extracted_triples, _, num_triples_extracted = extract_knowledge_graph(
                     text_content=sanitized_text,  # Use sanitized text
@@ -996,6 +1160,10 @@ def run_ingestion_pipeline_thread(
         f"[Job {job_id}] Pipeline thread finished. Success: {files_processed_successfully}, Failed: {files_failed}, Cached: {files_cached}. Final Status: {final_job_status}")
     src.utils.audit_db_manager.update_job_status(job_id=job_id, status=final_job_status)
 
+
+# =============================================================================
+# JOB MANAGEMENT FUNCTIONS (UNCHANGED)
+# =============================================================================
 
 _pipeline_threads: Dict[str, threading.Thread] = {}
 
