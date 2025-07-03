@@ -18,6 +18,7 @@ import warnings
 import os
 import threading
 from contextlib import contextmanager
+from dotenv import load_dotenv
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -174,6 +175,9 @@ class LLMOCRExtractor:
     """
 
     def __init__(self, config: Dict[str, Any]):
+
+        load_dotenv()
+
         self.config = config
 
         # Initialize all LLM clients
@@ -211,8 +215,10 @@ class LLMOCRExtractor:
     def _initialize_llm_clients(self):
         """Initialize available LLM clients"""
 
-        # Gemini client
+        # Gemini client - UPDATED: Environment first
         gemini_api_key = (
+                os.getenv('GOOGLE_API_KEY') or  # Environment first
+                os.getenv('GEMINI_API_KEY') or
                 self.config.get('GOOGLE_API_KEY') or
                 self.config.get('LLM_API_KEY') or
                 self.config.get('GEMINI_API_KEY') or
@@ -230,8 +236,9 @@ class LLMOCRExtractor:
                 logger.error(f"Failed to initialize Gemini: {e}")
                 self.gemini_client = None
 
-        # OpenAI client
+        # OpenAI client - UPDATED: Environment first
         openai_api_key = (
+                os.getenv('OPENAI_API_KEY') or  # Environment first
                 self.config.get('OPENAI_API_KEY') or
                 self.config.get('openai_api_key') or
                 self.config.get('llm', {}).get('ocr', {}).get('openai_api_key')
@@ -245,8 +252,9 @@ class LLMOCRExtractor:
                 logger.error(f"Failed to initialize OpenAI: {e}")
                 self.openai_client = None
 
-        # Claude client
+        # Claude client - UPDATED: Environment first
         claude_api_key = (
+                os.getenv('ANTHROPIC_API_KEY') or  # Environment first
                 self.config.get('ANTHROPIC_API_KEY') or
                 self.config.get('claude_api_key') or
                 self.config.get('llm', {}).get('ocr', {}).get('anthropic_api_key')
@@ -260,8 +268,9 @@ class LLMOCRExtractor:
                 logger.error(f"Failed to initialize Claude: {e}")
                 self.claude_client = None
 
-        # Mistral client
+        # Mistral client - UPDATED: Environment first
         mistral_api_key = (
+                os.getenv('MISTRAL_API_KEY') or  # Environment first
                 self.config.get('MISTRAL_API_KEY') or
                 self.config.get('mistral_api_key') or
                 self.config.get('mistral', {}).get('api_key') or
@@ -1466,10 +1475,15 @@ def get_supported_file_types() -> List[str]:
 
 def validate_api_keys(config: Dict[str, Any]) -> Dict[str, bool]:
     """Validate available API keys"""
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
     validation_results = {}
 
-    # Check Gemini/Google API key
+    # Check Gemini/Google API key - UPDATED: Environment first
     gemini_key = (
+            os.getenv('GOOGLE_API_KEY') or
+            os.getenv('GEMINI_API_KEY') or
             config.get('GOOGLE_API_KEY') or
             config.get('LLM_API_KEY') or
             config.get('GEMINI_API_KEY') or
@@ -1477,16 +1491,17 @@ def validate_api_keys(config: Dict[str, Any]) -> Dict[str, bool]:
     )
     validation_results['gemini'] = bool(gemini_key and GEMINI_AVAILABLE)
 
-    # Check OpenAI API key
-    openai_key = config.get('OPENAI_API_KEY')
+    # Check OpenAI API key - UPDATED: Environment first
+    openai_key = os.getenv('OPENAI_API_KEY') or config.get('OPENAI_API_KEY')
     validation_results['openai'] = bool(openai_key and OPENAI_AVAILABLE)
 
-    # Check Claude API key
-    claude_key = config.get('ANTHROPIC_API_KEY')
+    # Check Claude API key - UPDATED: Environment first
+    claude_key = os.getenv('ANTHROPIC_API_KEY') or config.get('ANTHROPIC_API_KEY')
     validation_results['claude'] = bool(claude_key and ANTHROPIC_AVAILABLE)
 
-    # Check Mistral API key
+    # Check Mistral API key - UPDATED: Environment first
     mistral_key = (
+            os.getenv('MISTRAL_API_KEY') or
             config.get('MISTRAL_API_KEY') or
             config.get('mistral_api_key')
     )

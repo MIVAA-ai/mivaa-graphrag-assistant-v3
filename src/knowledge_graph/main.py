@@ -7,6 +7,7 @@ import os
 import sys
 import logging
 import chardet
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
 
@@ -220,6 +221,11 @@ def get_unique_entities(triples):
 
 def main():
     """Main entry point for the knowledge graph generator."""
+
+    # ADDED: Load .env file first
+    load_dotenv()
+
+
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Knowledge Graph Generator and Visualizer')
     parser.add_argument('--test', action='store_true', help='Generate a test visualization with sample data')
@@ -239,6 +245,25 @@ def main():
     if not config:
         print(f"Failed to load configuration from {args.config}. Exiting.")
         return
+
+    # ADDED: Override config with environment variables
+    # Check for API key environment variables first
+    if os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY'):
+        if 'llm' not in config:
+            config['llm'] = {}
+        config['llm']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config['llm'].get(
+            'api_key')
+
+    # Override other LLM settings from environment if available
+    if os.getenv('LLM_MODEL'):
+        if 'llm' not in config:
+            config['llm'] = {}
+        config['llm']['model'] = os.getenv('LLM_MODEL')
+
+    if os.getenv('LLM_BASE_URL'):
+        if 'llm' not in config:
+            config['llm'] = {}
+        config['llm']['base_url'] = os.getenv('LLM_BASE_URL')
 
     # If test flag is provided, generate a sample visualization
     if args.test:

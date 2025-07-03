@@ -4,17 +4,17 @@
 [llm]
     # PRIMARY LLM CONFIGURATION - Used for all LLM operations unless overridden
     model = "gemini-1.5-flash-latest"
-    api_key = "your-google-api-key-here"
+    api_key = ""
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 2000
     temperature = 0.1
 
     [llm.ocr]
         # LLM OCR API KEYS - Multiple providers for redundancy
-        mistral_api_key = "your-mistral-api-key-here"
-        gemini_api_key = "your-google-api-key-here"
-        openai_api_key = "sk-your-openai-key-here"
-        anthropic_api_key = "sk-ant-your-anthropic-key-here"
+        mistral_api_key = ""
+        gemini_api_key = ""
+        openai_api_key = ""
+        anthropic_api_key = ""
 
         # LLM OCR Configuration - ACTIVELY USED by enhanced_ocr_pipeline.py
         primary_method = "gemini"
@@ -46,7 +46,7 @@
 [triple_extraction]
     # ACTIVELY USED by processing_pipeline.py and entity_standardization.py
     model = "gemini-1.5-flash-latest"
-    api_key = "your-google-api-key-here"
+    api_key = ""
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 2000
     temperature = 0.1
@@ -55,7 +55,7 @@
     # ACTIVELY USED by entity_standardization.py
     enabled = true
     model = "gemini-1.5-flash-latest"
-    api_key = "your-google-api-key-here"
+    api_key = ""
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 1500
     temperature = 0.1
@@ -64,7 +64,7 @@
     # ACTIVELY USED by entity_standardization.py
     enabled = true
     model = "gemini-1.5-flash-latest"
-    api_key = "your-google-api-key-here"
+    api_key = ""
     base_url = "https://generativelanguage.googleapis.com/v1beta/models"
     max_tokens = 1000
     temperature = 0.1
@@ -81,7 +81,7 @@
     # ACTIVELY USED by GraphRAG_Document_AI_Platform.py and neo4j_exporter.py
     uri = "bolt://localhost:7687"
     user = "neo4j"
-    password = "mivaa1234"
+    password = ""
     database = "neo4j"
 
 [vector_db]
@@ -290,7 +290,7 @@
 
 [mistral]
     # ACTIVELY USED by GraphRAG_Document_AI_Platform.py for backward compatibility
-    api_key = "your-mistral-api-key-here"
+    api_key = ""
     model = "pixtral-12b-2409"
     timeout = 30
 

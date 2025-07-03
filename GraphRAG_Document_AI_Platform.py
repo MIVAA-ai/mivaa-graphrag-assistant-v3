@@ -24,7 +24,7 @@ import configparser
 import requests
 import re
 from typing import Dict, Optional, Any
-
+from dotenv import load_dotenv
 from enhanced_ocr_pipeline import EnhancedOCRPipeline
 
 try:
@@ -148,9 +148,12 @@ logger = logging.getLogger(__name__)
 @st.cache_resource
 def get_enhanced_ocr_pipeline(config):
     """Initialize the enhanced LLM OCR pipeline with FIXED configuration mapping"""
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
     logger.info("Initializing Enhanced LLM OCR Pipeline...")
     try:
-        # FIXED: Proper config mapping for OCR settings
+        # FIXED: Proper config mapping for OCR settings with environment variable priority
         ocr_config = {
             # Map TOML structure to expected format
             'LLM_OCR_PRIMARY_METHOD': config.get('llm', {}).get('ocr', {}).get('primary_method', 'gemini'),
@@ -165,12 +168,14 @@ def get_enhanced_ocr_pipeline(config):
             'ANALYZE_QUALITY': config.get('metadata', {}).get('analyze_quality', True),
             'CHUNK_SIZE': config.get('metadata', {}).get('chunk_size', 1000),
 
-            # API Keys - use centralized TOML structure
-            'mistral_api_key': config.get('llm', {}).get('ocr', {}).get('mistral_api_key'),
-            'gemini_api_key': config.get('llm', {}).get('ocr', {}).get('gemini_api_key') or config.get('llm', {}).get(
-                'api_key'),
-            'openai_api_key': config.get('llm', {}).get('ocr', {}).get('openai_api_key'),
-            'anthropic_api_key': config.get('llm', {}).get('ocr', {}).get('anthropic_api_key'),
+            # API Keys - UPDATED: Environment variables first, then config fallback
+            'mistral_api_key': os.getenv('MISTRAL_API_KEY') or config.get('llm', {}).get('ocr', {}).get(
+                'mistral_api_key'),
+            'gemini_api_key': os.getenv('GOOGLE_API_KEY') or config.get('llm', {}).get('ocr', {}).get(
+                'gemini_api_key') or config.get('llm', {}).get('api_key'),
+            'openai_api_key': os.getenv('OPENAI_API_KEY') or config.get('llm', {}).get('ocr', {}).get('openai_api_key'),
+            'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY') or config.get('llm', {}).get('ocr', {}).get(
+                'anthropic_api_key'),
 
             # Pass full config sections
             'llm': config.get('llm', {}),
@@ -181,8 +186,8 @@ def get_enhanced_ocr_pipeline(config):
 
         pipeline = EnhancedOCRPipeline(ocr_config)
 
-        # Initialize LLM clients with centralized keys
-        mistral_api_key = ocr_config.get('mistral_api_key')
+        # Initialize LLM clients with environment variable priority
+        mistral_api_key = os.getenv('MISTRAL_API_KEY') or ocr_config.get('mistral_api_key')
         if mistral_api_key:
             mistral_client = get_mistral_client(mistral_api_key)
             if mistral_client:
@@ -211,6 +216,9 @@ def get_enhanced_ocr_pipeline(config):
 @st.cache_data
 def load_config():
     """UPDATED: Load configuration with proper TOML structure mapping"""
+    # ADDED: Load .env file first
+    load_dotenv()
+
     config = {}
     logger.info("Loading configuration...")
     try:
@@ -274,11 +282,43 @@ def load_config():
         else:
             logger.warning("config.toml not found or tomllib not available")
 
-        # 2. Environment Variables (Highest Priority)
-        config['NEO4J_URI'] = os.getenv('NEO4J_URI', config.get('NEO4J_URI'))
-        config['NEO4J_USER'] = os.getenv('NEO4J_USER', config.get('NEO4J_USER'))
-        config['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD', config.get('NEO4J_PASSWORD'))
-        config['LLM_API_KEY'] = os.getenv('LLM_API_KEY', os.getenv('GOOGLE_API_KEY', config.get('LLM_API_KEY')))
+        # 2. Environment Variables (Highest Priority) - UPDATED ORDER
+        config['NEO4J_URI'] = os.getenv('NEO4J_URI') or config.get('NEO4J_URI')
+        config['NEO4J_USER'] = os.getenv('NEO4J_USER') or config.get('NEO4J_USER')
+        config['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD') or config.get('NEO4J_PASSWORD')
+        config['LLM_API_KEY'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config.get('LLM_API_KEY')
+
+        # Also override nested config API keys
+        if config.get('llm') and isinstance(config['llm'], dict):
+            config['llm']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config['llm'].get(
+                'api_key')
+
+        if config.get('llm', {}).get('ocr') and isinstance(config['llm']['ocr'], dict):
+            ocr_config = config['llm']['ocr']
+            ocr_config['gemini_api_key'] = os.getenv('GOOGLE_API_KEY') or ocr_config.get('gemini_api_key')
+            ocr_config['mistral_api_key'] = os.getenv('MISTRAL_API_KEY') or ocr_config.get('mistral_api_key')
+            ocr_config['openai_api_key'] = os.getenv('OPENAI_API_KEY') or ocr_config.get('openai_api_key')
+            ocr_config['anthropic_api_key'] = os.getenv('ANTHROPIC_API_KEY') or ocr_config.get('anthropic_api_key')
+
+        # Update triple_extraction config with environment variables
+        if config.get('triple_extraction') and isinstance(config['triple_extraction'], dict):
+            config['triple_extraction']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config[
+                'triple_extraction'].get('api_key')
+            config['TRIPLE_EXTRACTION_API_KEY'] = config['triple_extraction']['api_key']
+
+        # Update relationship_inference config with environment variables
+        if config.get('relationship_inference') and isinstance(config['relationship_inference'], dict):
+            config['relationship_inference']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or \
+                                                          config['relationship_inference'].get('api_key')
+
+        # Update within_community_inference config with environment variables
+        if config.get('within_community_inference') and isinstance(config['within_community_inference'], dict):
+            config['within_community_inference']['api_key'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or \
+                                                              config['within_community_inference'].get('api_key')
+
+        # Update mistral config with environment variables
+        if config.get('mistral') and isinstance(config['mistral'], dict):
+            config['mistral']['api_key'] = os.getenv('MISTRAL_API_KEY') or config['mistral'].get('api_key')
 
         # 3. Final Validation
         required_for_qa = ['NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD', 'LLM_MODEL', 'LLM_API_KEY', 'EMBEDDING_MODEL',
@@ -319,12 +359,17 @@ def get_requests_session():
 @st.cache_resource
 def get_correction_llm(config):
     """Initializes and returns the LlamaIndex LLM needed for correction."""
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
     if not config or not config.get('_CONFIG_VALID', False):
         logger.warning("Skipping correction LLM initialization: Invalid base config")
         return None
 
     model_name = config.get('LLM_MODEL')
-    api_key = config.get('LLM_API_KEY')
+    # UPDATED: Check environment variables first
+    api_key = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config.get('LLM_API_KEY')
+
     if not model_name or not api_key:
         logger.warning("Correction LLM model/API key missing. Correction disabled")
         return None
@@ -354,6 +399,13 @@ def get_correction_llm(config):
 @st.cache_resource
 def get_mistral_client(api_key):
     """Initializes and returns a Mistral client."""
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
+    # UPDATED: Check environment variable first if no API key provided
+    if not api_key:
+        api_key = os.getenv('MISTRAL_API_KEY')
+
     if not api_key:
         logger.warning("Mistral API Key not provided. Mistral OCR will be disabled")
         return None
@@ -431,6 +483,17 @@ def get_chroma_collection(chroma_path, collection_name, embedding_model_name):
 @st.cache_resource
 def init_neo4j_exporter(uri, user, password):
     """Initializes and returns a Neo4jExporter instance."""
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
+    # UPDATED: Check environment variables first if parameters not provided
+    if not uri:
+        uri = os.getenv('NEO4J_URI')
+    if not user:
+        user = os.getenv('NEO4J_USER')
+    if not password:
+        password = os.getenv('NEO4J_PASSWORD')
+
     if not all([uri, user, password]):
         logger.error("Missing Neo4j URI, user, or password for exporter")
         return None
@@ -596,6 +659,9 @@ def process_documents_batch(uploaded_files, enhanced_ocr_pipeline, save_to_disk=
 
 def main():
     """Sets up the main app configuration and landing page."""
+
+    # ADDED: Load .env file first
+    load_dotenv()
 
     # Updated main title
     st.title("🤖 Document AI Assistant")

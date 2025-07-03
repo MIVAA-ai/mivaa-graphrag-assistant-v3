@@ -3,6 +3,8 @@ import logging
 import re
 from collections import defaultdict
 from typing import List, Dict, Optional, Any, Set, Tuple
+import os
+from dotenv import load_dotenv
 
 # FIXED: Reduced logging verbosity - only log at WARNING level by default
 logger = logging.getLogger(__name__)
@@ -436,6 +438,20 @@ def infer_relationships(triples: List[Dict], config: Dict) -> List[Dict]:
 # FIXED: New function to get LLM config for inference
 def _get_inference_llm_config(config: Dict) -> Optional[Dict]:
     """Get LLM configuration for relationship inference from various config sources."""
+
+    # ADDED: Ensure .env is loaded
+    load_dotenv()
+
+    # Try environment variables first
+    if os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY'):
+        return {
+            "model": os.getenv('LLM_MODEL') or config.get('LLM_MODEL', 'gemini-1.5-flash-latest'),
+            "api_key": os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY'),
+            "base_url": os.getenv('LLM_BASE_URL') or config.get('LLM_BASE_URL'),
+            "max_tokens": 1500,
+            "temperature": 0.1
+        }
+
     # Try relationship_inference specific config first (new TOML structure)
     rel_inference_config = config.get("relationship_inference", {})
     if rel_inference_config.get("model") and rel_inference_config.get("api_key"):

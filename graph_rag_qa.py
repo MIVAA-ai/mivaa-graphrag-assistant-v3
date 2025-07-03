@@ -11,6 +11,7 @@ from functools import wraps
 from functools import lru_cache
 import hashlib
 import asyncio
+from dotenv import load_dotenv
 
 # Import prompts - make sure these use the generic versions
 from src.knowledge_graph.prompts import (
@@ -1084,10 +1085,12 @@ Instructions:
         logger.info("=== GraphRAG processing complete ===")
         return answer_dict
 
-
 # Example usage and main block
 if __name__ == "__main__":
     print("=== Enhanced GraphRAG QA System ===")
+
+    # ADDED: Load .env file first
+    load_dotenv()
 
     # Configuration loading
     config_data = {}
@@ -1135,13 +1138,12 @@ if __name__ == "__main__":
             config_data.setdefault('NEO4J_USER', neo4j_config.get("neo4j", "user", fallback=None))
             config_data.setdefault('NEO4J_PASSWORD', neo4j_config.get("neo4j", "password", fallback=None))
 
-        # Environment variable overrides
-        config_data['NEO4J_URI'] = os.getenv('NEO4J_URI', config_data.get('NEO4J_URI'))
-        config_data['NEO4J_USER'] = os.getenv('NEO4J_USER', config_data.get('NEO4J_USER'))
-        config_data['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD', config_data.get('NEO4J_PASSWORD'))
-        config_data['LLM_API_KEY'] = os.getenv('LLM_API_KEY',
-                                               os.getenv('GOOGLE_API_KEY', config_data.get('LLM_API_KEY')))
-        config_data['LLM_MODEL'] = os.getenv('LLM_MODEL', config_data.get('LLM_MODEL'))
+        # Environment variable overrides - UPDATED: Check environment first
+        config_data['NEO4J_URI'] = os.getenv('NEO4J_URI') or config_data.get('NEO4J_URI')
+        config_data['NEO4J_USER'] = os.getenv('NEO4J_USER') or config_data.get('NEO4J_USER')
+        config_data['NEO4J_PASSWORD'] = os.getenv('NEO4J_PASSWORD') or config_data.get('NEO4J_PASSWORD')
+        config_data['LLM_API_KEY'] = os.getenv('GOOGLE_API_KEY') or os.getenv('LLM_API_KEY') or config_data.get('LLM_API_KEY')
+        config_data['LLM_MODEL'] = os.getenv('LLM_MODEL') or config_data.get('LLM_MODEL')
 
         # Validate required config
         required_keys = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "LLM_MODEL", "LLM_API_KEY"]

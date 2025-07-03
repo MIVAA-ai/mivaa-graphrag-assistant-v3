@@ -2,6 +2,7 @@ import configparser
 import logging
 import os
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
 
 # Import Neo4jPropertyGraphStore and handle potential ImportError
 try:
@@ -88,18 +89,31 @@ class Neo4jFewshotManager:
 
     def _load_credentials(self, config_file: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Loads Neo4j credentials from environment variables or config file."""
-        # Try environment variables first
+
+        # ADDED: Ensure .env is loaded
+        load_dotenv()
+
+        # Try standard environment variables first (consistent with other files)
+        username_env = os.getenv('NEO4J_USER')
+        password_env = os.getenv('NEO4J_PASSWORD')
+        url_env = os.getenv('NEO4J_URI')
+
+        if all([username_env, password_env, url_env]):
+            logger.info("Loaded Neo4j credentials from standard environment variables.")
+            return username_env, password_env, url_env
+
+        # Try fewshot-specific environment variables (fallback)
         username_env = os.getenv(f"{ENV_VAR_PREFIX}NEO4J_USERNAME")
         password_env = os.getenv(f"{ENV_VAR_PREFIX}NEO4J_PASSWORD")
         url_env = os.getenv(f"{ENV_VAR_PREFIX}NEO4J_URI")
 
         if all([username_env, password_env, url_env]):
-            logger.info("Loaded Neo4j credentials from environment variables.")
+            logger.info("Loaded Neo4j credentials from fewshot-specific environment variables.")
             return username_env, password_env, url_env
 
         logger.info(f"Environment variables not fully set. Attempting to load from config file: {config_file}")
 
-        # Fallback to config file
+        # Fallback to config file (existing code unchanged)
         config = configparser.ConfigParser()
         if not os.path.exists(config_file):
             logger.warning(f"Config file '{config_file}' not found.")
@@ -112,18 +126,25 @@ class Neo4jFewshotManager:
                 password_conf = config[NEO4J_SECTION].get("password")
                 url_conf = config[NEO4J_SECTION].get("uri")
 
+                # ADDED: Override with environment variables if available
+                username_conf = os.getenv('NEO4J_USER') or username_conf
+                password_conf = os.getenv('NEO4J_PASSWORD') or password_conf
+                url_conf = os.getenv('NEO4J_URI') or url_conf
+
                 if all([username_conf, password_conf, url_conf]):
-                    logger.info(f"Loaded Neo4j credentials from config file '{config_file}'.")
+                    logger.info(
+                        f"Loaded Neo4j credentials from config file '{config_file}' with environment overrides.")
                     return username_conf, password_conf, url_conf
                 else:
-                    logger.warning(f"Missing required keys ('user', 'password', 'uri') in [{NEO4J_SECTION}] section of '{config_file}'.")
+                    logger.warning(
+                        f"Missing required keys ('user', 'password', 'uri') in [{NEO4J_SECTION}] section of '{config_file}'.")
             else:
                 logger.warning(f"Missing section '[{NEO4J_SECTION}]' in config file '{config_file}'.")
 
         except configparser.Error as e:
             logger.error(f"Error reading config file '{config_file}': {e}", exc_info=True)
 
-        return None, None, None # Return None if loading failed
+        return None, None, None  # Return None if loading failed
 
     def _execute_query(self, query: str, param_map: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Helper method to execute queries with error handling using structured_query."""

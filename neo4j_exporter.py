@@ -7,6 +7,8 @@ from pathlib import Path
 import json
 import configparser
 import time
+import os
+from dotenv import load_dotenv
 
 try:
     import tomllib
@@ -678,6 +680,9 @@ class Neo4jExporter:
 if __name__ == "__main__":
     print("--- Enhanced Neo4j Exporter with OCR Integration ---")
 
+    # ADDED: Load .env file first
+    load_dotenv()
+
     config_path = Path("graph_config.ini")
     if not config_path.is_file():
         print(f"ERROR: Configuration file not found at {config_path}")
@@ -687,9 +692,15 @@ if __name__ == "__main__":
     config.read(config_path)
 
     try:
+        # Read from config file
         uri = config.get("neo4j", "uri", fallback=None)
         user = config.get("neo4j", "user", fallback=None)
         password = config.get("neo4j", "password", fallback=None)
+
+        # ADDED: Override with environment variables
+        uri = os.getenv('NEO4J_URI') or uri
+        user = os.getenv('NEO4J_USER') or user
+        password = os.getenv('NEO4J_PASSWORD') or password
 
         if not all([uri, user, password]):
             print("ERROR: Missing Neo4j configuration")
