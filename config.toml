@@ -96,7 +96,7 @@
 
             [llm.ocr.providers.gemini]
                 enabled = true
-                model = "gemini-1.5-flash"
+                model = "gemini-1.5-flash-latest"
                 api_key = ""              # Will use GOOGLE_API_KEY from .env
                 max_tokens = 4000
                 temperature = 0.1
@@ -219,10 +219,38 @@
     llm_max_pairs_per_community = 5
 
 [neo4j]
-    uri = "bolt://localhost:7687"
+    uri = "bolt://neo4j:7687"
     user = "neo4j"
     password = ""
     database = "neo4j"
+
+[database]
+    # PostgreSQL connection settings
+    host = "postgres"
+    port = 5432
+    database = "graphrag_chat"
+    user = "postgres"
+    password = ""
+    min_pool_size = 2
+    max_pool_size = 10
+
+    # Alternative: Use DATABASE_URL (overrides individual settings)
+    # url = "postgresql://postgres:your_password@localhost:5432/graphrag_chat"
+
+[chat]
+    # Chat system settings
+    max_conversations_per_user = 100
+    max_messages_per_conversation = 1000
+    auto_title_generation = true
+    enable_streaming = true
+    enable_search = true
+    search_results_limit = 50
+    message_feedback_enabled = true
+    default_user_id = "default_user"
+
+[users]
+    default_username = "default_user"
+    require_authentication = false
 
 [vector_db]
     persist_directory = "./chroma_db_pipeline"
@@ -442,9 +470,6 @@
     max_file_size_mb = 50
     max_processing_time_minutes = 30
     concurrent_file_limit = 1
-
-[database]
-    name = "neo4j"
 
 [metadata]
     extract_entities = true

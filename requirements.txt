@@ -33,6 +33,9 @@ pandas>=2.2.0                 # Data manipulation for UI metrics
 # Knowledge Graph & NLP
 langchain-text-splitters>=0.2.0  # Text chunking
 llama-index>=0.10.0           # Knowledge graph construction
+llama-index-graph-stores-neo4j>=0.1.0    # Neo4j graph store integration
+llama-index-embeddings-huggingface>=0.1.0  # HuggingFace embeddings
+llama-index-vector-stores-chroma>=0.1.0     # ChromaDB integration
 llama-index-llms-gemini>=0.1.0  # Gemini integration
 tiktoken>=0.7.0               # Token counting
 spacy>=3.7.0                  # NLP processing
@@ -85,3 +88,5 @@ websockets>=12.0                  # For WebSocket support
 # Rate limiting and caching
 slowapi>=0.1.9                   # For API rate limiting
 redis>=5.0.0                     # For caching and sessions
+
+asyncpg>=0.29.0

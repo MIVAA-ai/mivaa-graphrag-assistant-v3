@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # GraphRAG API Service
   graphrag-api:
@@ -22,6 +20,13 @@ services:
       - API_KEYS=${API_KEYS}
       - DEBUG=${DEBUG:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # PostgreSQL Database Environment Variables
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-graphrag123}@postgres:5432/graphrag_chat
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=graphrag_chat
+      - DB_USER=postgres
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-graphrag123}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -29,8 +34,12 @@ services:
       - ./ocr_outputs:/app/ocr_outputs
       - ./config.toml:/app/config.toml:ro
     depends_on:
-      - neo4j
-      - redis
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - graphrag-network
@@ -63,6 +72,13 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - API_KEYS=${API_KEYS}
+      # PostgreSQL Database Environment Variables
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-graphrag123}@postgres:5432/graphrag_chat
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=graphrag_chat
+      - DB_USER=postgres
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-graphrag123}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -70,9 +86,24 @@ services:
       - ./ocr_outputs:/app/ocr_outputs
       - ./config.toml:/app/config.toml:ro
     depends_on:
-      - neo4j
-      - redis
-    command: ["streamlit", "run", "GraphRAG_Document_AI_Platform.py", "--server.port=8501", "--server.address=0.0.0.0"]
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      graphrag-api:
+        condition: service_healthy
+    # FIXED: Install missing dependencies before starting Streamlit
+    command: >
+      sh -c "
+        echo '🔄 Installing required dependencies...' &&
+        pip install --no-cache-dir spacy llama-index-graph-stores-neo4j llama-index-embeddings-huggingface llama-index-vector-stores-chroma &&
+        python -m spacy download en_core_web_sm &&
+        echo '✅ All dependencies installed successfully!' &&
+        echo '🚀 Starting Streamlit application...' &&
+        streamlit run GraphRAG_Document_AI_Platform.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true --server.enableWebsocketCompression=false
+      "
     restart: unless-stopped
     networks:
       - graphrag-network
@@ -81,9 +112,54 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s  # Increased to allow time for dependency installation
 
-  # Neo4j Database - FIXED CONFIGURATION
+  # PostgreSQL Database for Chat System
+  postgres:
+    image: postgres:15-alpine
+    container_name: graphrag-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: graphrag_chat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-graphrag123}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d graphrag_chat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Optional: pgAdmin for PostgreSQL Management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: graphrag-pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@graphrag.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - graphrag-network
+    profiles:
+      - management  # Optional service - enable with: docker-compose --profile management up
+
+  # Neo4j Database
   neo4j:
     image: neo4j:5.15-community
     container_name: graphrag-neo4j
@@ -97,6 +173,7 @@ services:
       - NEO4J_dbms_memory_heap_initial__size=512m
       - NEO4J_dbms_memory_heap_max__size=2G
       - NEO4J_dbms_memory_pagecache_size=1G
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -116,6 +193,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: graphrag-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
@@ -131,6 +209,7 @@ services:
       start_period: 30s
 
 volumes:
+  # Neo4j volumes
   neo4j_data:
     driver: local
   neo4j_logs:
@@ -139,9 +218,18 @@ volumes:
     driver: local
   neo4j_plugins:
     driver: local
+  # Redis volume
   redis_data:
+    driver: local
+  # PostgreSQL volumes
+  postgres_data:
+    driver: local
+  pgadmin_data:
     driver: local
 
 networks:
   graphrag-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

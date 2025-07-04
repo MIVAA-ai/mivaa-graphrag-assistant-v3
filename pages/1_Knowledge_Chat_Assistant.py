@@ -1,4 +1,4 @@
-# pages/1_Knowledge_Chat_Assistant.py
+# pages/1_Knowledge_Chat_Assistant.py - UPDATED WITH SYNC DATABASE INTEGRATION
 
 import streamlit as st
 import logging
@@ -16,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Modern, clean styling focused on chat experience
+# Keep the same CSS styling from the original file
 st.markdown("""
 <style>
     /* Import modern fonts */
@@ -99,17 +99,7 @@ st.markdown("""
         box-shadow: var(--shadow-md) !important;
     }
 
-    /* Single container for question-answer pairs */
-    .chat-pair {
-        background: var(--bg-chat);
-        border: 1px solid var(--border-light);
-        border-radius: var(--radius-xl);
-        padding: 1.5rem;
-        margin: 0.75rem 0;
-        box-shadow: var(--shadow-sm);
-    }
-
-    /* User messages - part of pair */
+    /* User messages */
     .stChatMessage[data-testid="chat-message-user"] {
         background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%) !important;
         border-color: #bfdbfe !important;
@@ -117,51 +107,12 @@ st.markdown("""
         border-radius: 12px 12px 4px 12px !important;
     }
 
-    /* Assistant messages - part of pair */
+    /* Assistant messages */
     .stChatMessage[data-testid="chat-message-assistant"] {
         background: var(--bg-chat) !important;
         border-color: var(--border-light) !important;
         margin: 0 !important;
         border-radius: 4px 12px 12px 12px !important;
-    }
-
-    /* Normal chat input - not fixed */
-    .stChatInput {
-        position: relative !important;
-        bottom: auto !important;
-        left: auto !important;
-        right: auto !important;
-        z-index: auto !important;
-        max-width: 100% !important;
-        margin: 1rem 0 !important;
-    }
-
-    .stChatInput > div {
-        background: var(--bg-primary) !important;
-        border: 2px solid var(--border-light) !important;
-        border-radius: var(--radius-xl) !important;
-        box-shadow: var(--shadow-sm) !important;
-        transition: all 0.2s ease !important;
-    }
-
-    .stChatInput > div:focus-within {
-        border-color: var(--accent-blue) !important;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1) !important;
-    }
-
-    .stChatInput textarea {
-        border: none !important;
-        font-size: 1rem !important;
-        line-height: 1.5 !important;
-        padding: 1rem 1.25rem !important;
-        min-height: 2.5rem !important;
-        resize: none !important;
-        background: transparent !important;
-    }
-
-    .stChatInput textarea::placeholder {
-        color: var(--text-muted) !important;
-        font-style: italic !important;
     }
 
     /* Better buttons */
@@ -264,40 +215,59 @@ st.markdown("""
         color: var(--accent-red);
     }
 
-    /* Sidebar improvements */
-    .css-1d391kg {
-        background: var(--bg-primary) !important;
-        border-right: 1px solid var(--border-light) !important;
+    /* Conversation sidebar */
+    .conversation-sidebar {
+        background: var(--bg-primary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        padding: 1rem;
+        margin-bottom: 1rem;
+        max-height: 400px;
+        overflow-y: auto;
     }
 
-    /* Chat container spacing - normal spacing */
-    .main .block-container {
-        padding-bottom: 2rem !important;
+    .conversation-item {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        cursor: pointer;
+        transition: all 0.2s ease;
     }
 
-    /* Success/error messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        border-radius: var(--radius-lg) !important;
-        border: none !important;
-        box-shadow: var(--shadow-sm) !important;
+    .conversation-item:hover {
+        border-color: var(--accent-blue);
+        box-shadow: var(--shadow-sm);
     }
 
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .stChatMessage {
-            margin: 0.25rem 0 !important;
-        }
-
-        .compact-header {
-            padding: 0.75rem 1rem;
-        }
-
-        .compact-header h1 {
-            font-size: 1.25rem;
-        }
+    .conversation-item.active {
+        border-color: var(--accent-blue);
+        background: rgba(59, 130, 246, 0.05);
     }
 
-    /* Smooth animations */
+    .conversation-title {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+        font-size: 0.875rem;
+    }
+
+    .conversation-preview {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .conversation-meta {
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        margin-top: 0.25rem;
+    }
+
+    /* Fade animations */
     .fade-in {
         animation: fadeIn 0.3s ease-in;
     }
@@ -305,6 +275,19 @@ st.markdown("""
     @keyframes fadeIn {
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .stChatMessage {
+            margin: 0.25rem 0 !important;
+        }
+        .compact-header {
+            padding: 0.75rem 1rem;
+        }
+        .compact-header h1 {
+            font-size: 1.25rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -329,19 +312,30 @@ except ImportError as e:
     st.error(f"❌ Error importing project modules: {e}")
     IMPORTS_SUCCESSFUL = False
 
+# Sync Database Integration Imports
+try:
+    # Import the NEW sync database system
+    from src.chat.sync_database import create_sync_chat_service
+
+    DATABASE_INTEGRATION_AVAILABLE = True
+    logger.info("✅ Sync database chat integration available")
+except ImportError as e:
+    DATABASE_INTEGRATION_AVAILABLE = False
+    logger.warning(f"⚠️ Sync database chat integration not available: {e}")
+
 # Constants
 CHAT_HISTORY_FILE = Path("./chat_history.json")
 
 
 # Helper Functions
 def load_chat_history() -> List[Dict]:
-    """Load chat history with error handling."""
+    """Load chat history with error handling - JSON fallback."""
     if CHAT_HISTORY_FILE.is_file():
         try:
             with open(CHAT_HISTORY_FILE, 'r', encoding='utf-8') as f:
                 history = json.load(f)
             if isinstance(history, list):
-                logger.info(f"📚 Loaded {len(history)} messages from chat history")
+                logger.info(f"📚 Loaded {len(history)} messages from JSON chat history")
                 return history
             else:
                 logger.warning("🔄 Invalid chat history format, starting fresh")
@@ -353,11 +347,11 @@ def load_chat_history() -> List[Dict]:
 
 
 def save_chat_history(messages: List[Dict]):
-    """Save chat history with error handling."""
+    """Save chat history with error handling - JSON fallback."""
     try:
         with open(CHAT_HISTORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(messages, f, indent=2)
-        logger.debug(f"💾 Saved {len(messages)} messages to chat history")
+        logger.debug(f"💾 Saved {len(messages)} messages to JSON chat history")
     except Exception as e:
         logger.error(f"💥 Error saving chat history: {e}")
 
@@ -381,40 +375,116 @@ def format_timestamp(timestamp: str) -> str:
         return timestamp
 
 
+def initialize_sync_chat_service(config):
+    """Initialize the SYNC chat service with database or fallback to JSON."""
+    try:
+        if DATABASE_INTEGRATION_AVAILABLE and config:
+            # Try to initialize SYNC database chat service
+            chat_service = create_sync_chat_service(config)
+            logger.info("✅ Sync database chat service initialized")
+            return chat_service, True
+        else:
+            logger.info("📄 Using JSON file chat system")
+            return None, False
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize sync database chat service: {e}")
+        return None, False
+
+
+def load_messages_from_service(chat_service, use_database):
+    """Load messages from database or JSON file."""
+    try:
+        if use_database and chat_service:
+            # Load from SYNC database
+            messages = chat_service.load_chat_history()
+            logger.info(f"📚 Loaded {len(messages)} messages from sync database")
+            return messages
+        else:
+            # Load from JSON file
+            return load_chat_history()
+    except Exception as e:
+        logger.error(f"❌ Error loading messages: {e}")
+        return load_chat_history()  # Fallback to JSON
+
+
+def save_messages_to_service(messages, chat_service, use_database):
+    """Save messages to database or JSON file."""
+    try:
+        if use_database and chat_service:
+            # Save to SYNC database
+            success = chat_service.save_chat_history(messages)
+            if success:
+                logger.debug(f"💾 Saved {len(messages)} messages to sync database")
+            else:
+                logger.warning("⚠️ Database save failed, falling back to JSON")
+                save_chat_history(messages)
+        else:
+            # Save to JSON file
+            save_chat_history(messages)
+    except Exception as e:
+        logger.error(f"❌ Error saving messages: {e}")
+        # Fallback to JSON
+        save_chat_history(messages)
+
+
+def add_message_to_service(message, chat_service, use_database):
+    """Add single message to database or JSON file."""
+    try:
+        if use_database and chat_service:
+            # Add to SYNC database
+            result = chat_service.add_message(message)
+            if result:
+                logger.debug("➕ Added message to sync database")
+            else:
+                logger.warning("⚠️ Database add failed")
+        else:
+            # Add to session state (will be saved with full history)
+            pass
+    except Exception as e:
+        logger.error(f"❌ Error adding message: {e}")
+
+
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
 
-# Compact header instead of big banner
+# Compact header
 st.markdown("""
 <div class="compact-header fade-in">
     <h1>🔍 Knowledge Assistant</h1>
-    <p>AI-powered document analysis</p>
+    <p>AI-powered document analysis with persistent chat history</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# SIDEBAR - Compact Control Panel
+# SIDEBAR - Enhanced with Database Status
 # ============================================================================
 
 with st.sidebar:
     st.markdown("## ⚙️ System Control")
 
-    # Initialize system status
+    # Initialize system components
     qa_engine: Optional[GraphRAGQA] = None
     is_engine_ready = False
     config = None
     neo4j_count = 0
+    chat_service = None
+    use_database = False
 
     if IMPORTS_SUCCESSFUL:
         # System initialization
-        with st.spinner("🔄 Initializing..."):
+        with st.spinner("🔄 Initializing systems..."):
             try:
+                # Load configuration
                 config = load_config()
                 if config and config.get('_CONFIG_VALID'):
+                    # Initialize QA engine
                     correction_llm = get_correction_llm(config)
                     qa_engine = load_qa_engine(config, correction_llm)
                     is_engine_ready = qa_engine and qa_engine.is_ready()
+
+                    # Initialize SYNC chat service
+                    chat_service, use_database = initialize_sync_chat_service(config)
 
                     if is_engine_ready:
                         st.success("✅ AI Engine Ready")
@@ -427,12 +497,13 @@ with st.sidebar:
                 logger.error(f"System initialization error: {e}")
                 st.error(f"❌ Initialization failed: {e}")
 
-        # Compact system status
-        st.markdown("### 📊 Status")
+        # Enhanced system status
+        st.markdown("### 📊 System Status")
 
         col1, col2 = st.columns(2)
 
         with col1:
+            # AI Engine Status
             if is_engine_ready:
                 st.markdown("**AI Engine**")
                 st.markdown('<div class="status-indicator status-online">● Online</div>', unsafe_allow_html=True)
@@ -441,14 +512,27 @@ with st.sidebar:
                 st.markdown('<div class="status-indicator status-offline">● Offline</div>', unsafe_allow_html=True)
 
         with col2:
-            if config and config.get('_CONFIG_VALID'):
-                st.markdown("**Config**")
-                st.markdown('<div class="status-indicator status-online">● Valid</div>', unsafe_allow_html=True)
+            # Database Status
+            if use_database:
+                st.markdown("**Database**")
+                st.markdown('<div class="status-indicator status-online">● Connected</div>', unsafe_allow_html=True)
             else:
-                st.markdown("**Config**")
-                st.markdown('<div class="status-indicator status-offline">● Invalid</div>', unsafe_allow_html=True)
+                st.markdown("**Storage**")
+                st.markdown('<div class="status-indicator status-offline">● JSON File</div>', unsafe_allow_html=True)
 
-        # Compact knowledge base metrics
+        # Configuration status
+        if config and config.get('_CONFIG_VALID'):
+            st.markdown("**Configuration:** ✅ Valid")
+        else:
+            st.markdown("**Configuration:** ❌ Invalid")
+
+        # Database connection indicator
+        if DATABASE_INTEGRATION_AVAILABLE:
+            st.markdown("**Chat System:** 🗄️ Database-Enhanced (Sync)")
+        else:
+            st.markdown("**Chat System:** 📄 File-Based")
+
+        # Knowledge base metrics
         if is_engine_ready and config:
             st.markdown("### 📊 Knowledge Base")
 
@@ -479,8 +563,8 @@ with st.sidebar:
             with col2:
                 st.markdown(f"""
                 <div class="compact-metric">
-                    <div class="compact-metric-value">9</div>
-                    <div class="compact-metric-label">Documents</div>
+                    <div class="compact-metric-value">📊</div>
+                    <div class="compact-metric-label">GraphRAG</div>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -493,15 +577,26 @@ with st.sidebar:
     else:
         st.error("❌ Core modules not available")
 
-    # Initialize chat history
+    # Initialize chat history with new SYNC system
     if "messages" not in st.session_state:
-        st.session_state.messages = load_chat_history()
+        st.session_state.messages = load_messages_from_service(chat_service, use_database)
 
-    # Compact session analytics
+    if "chat_service" not in st.session_state:
+        st.session_state.chat_service = chat_service
+
+    if "use_database" not in st.session_state:
+        st.session_state.use_database = use_database
+
+    # Session analytics
     if st.session_state.messages:
-        st.markdown("### 📈 Session")
+        st.markdown("### 📈 Session Analytics")
         total_messages = len(st.session_state.messages)
         user_messages = len([m for m in st.session_state.messages if m["role"] == "user"])
+
+        # Calculate average response time
+        response_times = [m.get("response_time", 0) for m in st.session_state.messages if
+                          m.get("role") == "assistant" and m.get("response_time")]
+        avg_response_time = sum(response_times) / len(response_times) if response_times else 0
 
         col1, col2 = st.columns(2)
         with col1:
@@ -520,24 +615,74 @@ with st.sidebar:
             </div>
             """, unsafe_allow_html=True)
 
-    # Compact controls
+        if avg_response_time > 0:
+            st.markdown(f"""
+            <div class="compact-metric">
+                <div class="compact-metric-value">{avg_response_time:.1f}s</div>
+                <div class="compact-metric-label">Avg Response</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Enhanced controls
     st.markdown("### 🔧 Controls")
 
-    if st.button("🗑️ Clear History", use_container_width=True):
+    # Clear history with database awareness
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
         st.session_state.messages = []
-        save_chat_history([])
-        st.success("Chat history cleared!")
+        save_messages_to_service([], st.session_state.chat_service, st.session_state.use_database)
+        if st.session_state.use_database:
+            st.success("✅ Sync database chat history cleared!")
+        else:
+            st.success("✅ JSON chat history cleared!")
         st.rerun()
 
-    if st.button("🔄 Refresh", use_container_width=True):
+    # Refresh system
+    if st.button("🔄 Refresh System", use_container_width=True):
+        # Clear caches
         st.cache_data.clear()
+
+        # Reset session state
+        for key in ['messages', 'chat_service', 'use_database']:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        st.success("🔄 System refreshed!")
         st.rerun()
+
+    # Database migration (if available)
+    if DATABASE_INTEGRATION_AVAILABLE and not st.session_state.use_database:
+        if st.button("🔄 Migrate to Database", use_container_width=True):
+            try:
+                # Try to initialize sync database
+                if config:
+                    chat_service_new, use_database_new = initialize_sync_chat_service(config)
+                    if use_database_new and chat_service_new:
+                        # Migrate existing messages
+                        if st.session_state.messages:
+                            success = chat_service_new.save_chat_history(st.session_state.messages)
+                            if success:
+                                st.session_state.chat_service = chat_service_new
+                                st.session_state.use_database = use_database_new
+                                st.success("✅ Migrated to sync database successfully!")
+                            else:
+                                st.error("❌ Database migration failed")
+                        else:
+                            st.session_state.chat_service = chat_service_new
+                            st.session_state.use_database = use_database_new
+                            st.success("✅ Sync database chat system activated!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Sync database migration failed")
+                else:
+                    st.error("❌ Configuration not available")
+            except Exception as e:
+                st.error(f"❌ Migration error: {e}")
 
 # ============================================================================
 # MAIN CHAT INTERFACE
 # ============================================================================
 
-# Performance indicator for last response (more subtle)
+# Performance indicator for last response
 if st.session_state.messages:
     last_msg = st.session_state.messages[-1]
     if last_msg.get("role") == "assistant" and "response_time" in last_msg:
@@ -557,7 +702,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Enhanced chat input
+# Enhanced chat input with database awareness
 if IMPORTS_SUCCESSFUL and is_engine_ready:
     if neo4j_count > 0:
         placeholder = "💼 Ask me about your business documents and data..."
@@ -565,6 +710,12 @@ if IMPORTS_SUCCESSFUL and is_engine_ready:
         placeholder = "📋 Please process documents first, then start asking questions..."
 else:
     placeholder = "🔧 System initializing - please wait..."
+
+# Storage indicator in placeholder
+if st.session_state.use_database:
+    placeholder += " [💾 Database]"
+else:
+    placeholder += " [📄 File]"
 
 # Main chat input
 if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_engine_ready)):
@@ -575,7 +726,9 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
         "timestamp": datetime.now().isoformat()
     }
     st.session_state.messages.append(user_message)
-    save_chat_history(st.session_state.messages)
+
+    # Save to appropriate storage
+    add_message_to_service(user_message, st.session_state.chat_service, st.session_state.use_database)
 
     # Display user message
     with st.chat_message("user"):
@@ -604,7 +757,12 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
             "response_time": 0.1
         }
         st.session_state.messages.append(assistant_message)
-        save_chat_history(st.session_state.messages)
+
+        # Save to appropriate storage
+        add_message_to_service(assistant_message, st.session_state.chat_service, st.session_state.use_database)
+        save_messages_to_service(st.session_state.messages, st.session_state.chat_service,
+                                 st.session_state.use_database)
+
         st.rerun()
 
     else:
@@ -635,13 +793,18 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
                         if key in response_dict and response_dict[key] is not None:
                             assistant_message[key] = response_dict[key]
 
-                    # Save to history
+                    # Save to session and storage
                     st.session_state.messages.append(assistant_message)
-                    save_chat_history(st.session_state.messages)
+                    add_message_to_service(assistant_message, st.session_state.chat_service,
+                                           st.session_state.use_database)
+                    save_messages_to_service(st.session_state.messages, st.session_state.chat_service,
+                                             st.session_state.use_database)
 
                     # Success feedback
                     emoji, status, _ = get_performance_indicator(duration)
-                    st.success(f"{emoji} Analysis completed in {duration:.2f}s - {status} performance")
+                    storage_type = "sync database" if st.session_state.use_database else "file"
+                    st.success(
+                        f"{emoji} Analysis completed in {duration:.2f}s - {status} performance | 💾 Saved to {storage_type}")
 
                 except Exception as e:
                     duration = time.time() - start_time
@@ -658,9 +821,55 @@ if prompt := st.chat_input(placeholder, disabled=not (IMPORTS_SUCCESSFUL and is_
                         "error_info": str(e)
                     }
 
+                    # Save error message too
                     st.session_state.messages.append(assistant_message)
-                    save_chat_history(st.session_state.messages)
+                    add_message_to_service(assistant_message, st.session_state.chat_service,
+                                           st.session_state.use_database)
+                    save_messages_to_service(st.session_state.messages, st.session_state.chat_service,
+                                             st.session_state.use_database)
 
                     logger.exception("Error in QA processing")
 
         st.rerun()
+
+# ============================================================================
+# FOOTER - System Information
+# ============================================================================
+
+# Show system information at the bottom
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.session_state.use_database:
+        st.markdown("💾 **Storage:** Sync Database")
+    else:
+        st.markdown("📄 **Storage:** JSON File")
+
+with col2:
+    if DATABASE_INTEGRATION_AVAILABLE:
+        st.markdown("🔧 **System:** Sync Database-Ready")
+    else:
+        st.markdown("🔧 **System:** File-Based")
+
+with col3:
+    message_count = len(st.session_state.messages)
+    st.markdown(f"📊 **Messages:** {message_count}")
+
+# Debug information (only in development)
+try:
+    debug_mode = st.secrets.get("debug_mode", False)
+except:
+    debug_mode = False
+
+if debug_mode:
+    with st.expander("🔍 Debug Information"):
+        st.json({
+            "database_integration_available": DATABASE_INTEGRATION_AVAILABLE,
+            "use_database": st.session_state.use_database,
+            "chat_service_active": st.session_state.chat_service is not None,
+            "imports_successful": IMPORTS_SUCCESSFUL,
+            "engine_ready": is_engine_ready,
+            "neo4j_entities": neo4j_count,
+            "message_count": len(st.session_state.messages)
+        })
