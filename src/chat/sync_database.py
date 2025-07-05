@@ -1,134 +1,96 @@
-# src/chat/sync_database.py
+# src/chat/sync_database.py - PURE SYNC VERSION using psycopg2
 import logging
-import asyncio
-import threading
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 import uuid
 import json
-import asyncpg
-from concurrent.futures import ThreadPoolExecutor
-import functools
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+import os
 
 logger = logging.getLogger(__name__)
 
 
 class SyncDatabaseManager:
-    """
-    Synchronous database manager that properly handles async operations
-    in Streamlit's threading environment.
-    """
+    """Pure synchronous database manager using psycopg2"""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self._pool = None
-        self._loop = None
-        self._thread = None
-        self._executor = ThreadPoolExecutor(max_workers=4)
         self._initialized = False
+        self._connection_params = None
 
     def initialize(self) -> bool:
-        """Initialize the database connection in a separate thread with its own event loop"""
+        """Initialize the database connection - PURE SYNC VERSION"""
         try:
             logger.info("🔄 Initializing sync database manager...")
 
-            # Create a separate thread for async operations
-            self._thread = threading.Thread(target=self._run_async_loop, daemon=True)
-            self._thread.start()
+            # Build connection parameters
+            self._connection_params = self._build_connection_params()
 
-            # Wait for initialization to complete
-            future = self._submit_async_task(self._async_initialize())
-            result = future.result(timeout=30)  # 30 second timeout
+            # Create connection pool
+            self._pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                host=self._connection_params['host'],
+                port=self._connection_params['port'],
+                database=self._connection_params['database'],
+                user=self._connection_params['user'],
+                password=self._connection_params['password']
+            )
 
-            self._initialized = result
-            if result:
-                logger.info("✅ Sync database manager initialized successfully")
-            else:
-                logger.error("❌ Failed to initialize sync database manager")
+            # Test connection and create schema
+            self._ensure_schema()
 
-            return result
+            self._initialized = True
+            logger.info("✅ Sync database manager initialized successfully")
+            return True
 
         except Exception as e:
             logger.error(f"❌ Sync database initialization failed: {e}")
             return False
 
-    def _run_async_loop(self):
-        """Run event loop in separate thread"""
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_forever()
-        finally:
-            self._loop.close()
+    def _build_connection_params(self) -> Dict[str, Any]:
+        """Build connection parameters from config"""
+        db_config = self.config.get('database', {})
 
-    def _submit_async_task(self, coro):
-        """Submit async task to the dedicated event loop"""
-        if not self._loop:
-            raise RuntimeError("Event loop not initialized")
+        connection_params = {
+            'host': db_config.get('host', 'localhost'),
+            'port': db_config.get('port', 5432),
+            'database': db_config.get('database', 'graphrag_chat'),
+            'user': db_config.get('user', 'postgres'),
+            'password': db_config.get('password', 'password')
+        }
 
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future
+        # Override with environment variables
+        connection_params.update({
+            'host': os.getenv('DB_HOST', connection_params['host']),
+            'port': int(os.getenv('DB_PORT', connection_params['port'])),
+            'database': os.getenv('DB_NAME', connection_params['database']),
+            'user': os.getenv('DB_USER', connection_params['user']),
+            'password': os.getenv('DB_PASSWORD', connection_params['password'])
+        })
 
-    async def _async_initialize(self) -> bool:
-        """Async initialization logic"""
-        try:
-            # Get database configuration
-            db_config = self.config.get('database', {})
+        return connection_params
 
-            # Build connection parameters
-            connection_params = {
-                'host': db_config.get('host', 'localhost'),
-                'port': db_config.get('port', 5432),
-                'database': db_config.get('database', 'graphrag_chat'),
-                'user': db_config.get('user', 'postgres'),
-                'password': db_config.get('password', 'password'),
-                'min_size': db_config.get('min_pool_size', 2),
-                'max_size': db_config.get('max_pool_size', 10),
-                'command_timeout': 60
-            }
+    def _get_connection(self):
+        """Get a connection from the pool"""
+        if not self._pool:
+            raise RuntimeError("Database not initialized")
+        return self._pool.getconn()
 
-            # Override with environment variables
-            import os
-            connection_params.update({
-                'host': os.getenv('DB_HOST', connection_params['host']),
-                'port': int(os.getenv('DB_PORT', connection_params['port'])),
-                'database': os.getenv('DB_NAME', connection_params['database']),
-                'user': os.getenv('DB_USER', connection_params['user']),
-                'password': os.getenv('DB_PASSWORD', connection_params['password'])
-            })
+    def _put_connection(self, conn):
+        """Return a connection to the pool"""
+        if self._pool:
+            self._pool.putconn(conn)
 
-            logger.info(
-                f"🔗 Connecting to PostgreSQL: {connection_params['user']}@{connection_params['host']}:{connection_params['port']}/{connection_params['database']}")
-
-            # Create connection pool
-            self._pool = await asyncpg.create_pool(
-                host=connection_params['host'],
-                port=connection_params['port'],
-                database=connection_params['database'],
-                user=connection_params['user'],
-                password=connection_params['password'],
-                min_size=connection_params['min_size'],
-                max_size=connection_params['max_size'],
-                command_timeout=connection_params['command_timeout']
-            )
-
-            # Create schema
-            await self._ensure_schema()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"💥 Async initialization failed: {e}")
-            return False
-
-    async def _ensure_schema(self):
-        """Create database schema if it doesn't exist"""
+    def _ensure_schema(self):
+        """Create database schema"""
         schema_sql = """
-        -- Enable required extensions
         CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
         CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
-        -- Users table
         CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             username VARCHAR(100) UNIQUE NOT NULL,
@@ -138,7 +100,6 @@ class SyncDatabaseManager:
             preferences JSONB DEFAULT '{}'
         );
 
-        -- Conversations table
         CREATE TABLE IF NOT EXISTS conversations (
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             user_id VARCHAR(100) NOT NULL DEFAULT 'default_user',
@@ -150,7 +111,6 @@ class SyncDatabaseManager:
             message_count INTEGER DEFAULT 0
         );
 
-        -- Messages table
         CREATE TABLE IF NOT EXISTS messages (
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -158,403 +118,287 @@ class SyncDatabaseManager:
             content TEXT NOT NULL,
             timestamp VARCHAR(50) NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-            -- AI Response Metadata
             response_time FLOAT,
             model_used VARCHAR(100),
             tokens_used INTEGER,
-
-            -- RAG Attribution
             sources JSONB,
             cypher_query TEXT,
             linked_entities JSONB,
             info JSONB,
-
-            -- User Feedback
-            user_rating INTEGER CHECK (user_rating BETWEEN -1 AND 1),
+            user_rating INTEGER,
             user_feedback TEXT,
-
-            -- Technical
             error_info TEXT,
             processing_status VARCHAR(20) DEFAULT 'completed'
         );
 
-        -- Create indexes
-        CREATE INDEX IF NOT EXISTS idx_conversations_user_updated 
-            ON conversations(user_id, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_messages_conversation_created 
-            ON messages(conversation_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at);
 
-        -- Create default user
-        INSERT INTO users (username, email) 
-        VALUES ('default_user', 'default@example.com')
-        ON CONFLICT (username) DO NOTHING;
+        INSERT INTO users (username, email) VALUES ('default_user', 'default@example.com') ON CONFLICT (username) DO NOTHING;
         """
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(schema_sql)
-            logger.info("✅ Database schema ensured")
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(schema_sql)
+                conn.commit()
+                logger.info("✅ Database schema ensured")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to create schema: {e}")
+            raise
+        finally:
+            self._put_connection(conn)
 
-    # ==========================================================================
-    # SYNC INTERFACE METHODS
-    # ==========================================================================
-
-    def load_messages(self, user_id: str = "default_user", conversation_id: str = None) -> List[Dict[str, Any]]:
+    def load_messages(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
         """Load messages synchronously"""
         if not self._initialized:
-            logger.error("Database not initialized")
+            logger.warning("Database not initialized, returning empty list")
             return []
 
         try:
-            future = self._submit_async_task(self._async_load_messages(user_id, conversation_id))
-            return future.result(timeout=10)
+            self._ensure_user(user_id)
+            conversation_id = self._get_or_create_default_conversation(user_id)
+
+            query = """
+            SELECT role, content, timestamp, response_time, model_used, tokens_used,
+                   sources, cypher_query, linked_entities, info, error_info
+            FROM messages WHERE conversation_id = %s ORDER BY created_at ASC
+            """
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(query, (conversation_id,))
+                    rows = cur.fetchall()
+
+                    messages = []
+                    for row in rows:
+                        message = {
+                            "role": row['role'],
+                            "content": row['content'],
+                            "timestamp": row['timestamp']
+                        }
+
+                        # Add optional fields only if they exist
+                        if row['response_time']:
+                            message["response_time"] = row['response_time']
+                        if row['model_used']:
+                            message["model_used"] = row['model_used']
+                        if row['sources']:
+                            message["sources"] = row['sources']
+                        if row['cypher_query']:
+                            message["cypher_query"] = row['cypher_query']
+                        if row['info']:
+                            message["info"] = row['info']
+                        if row['error_info']:
+                            message["error_info"] = row['error_info']
+
+                        messages.append(message)
+
+                    logger.info(f"📚 Loaded {len(messages)} messages from sync database")
+                    return messages
+
+            finally:
+                self._put_connection(conn)
+
         except Exception as e:
             logger.error(f"💥 Error loading messages: {e}")
             return []
 
-    def save_message(self, message_dict: Dict[str, Any], user_id: str = "default_user",
-                     conversation_id: str = None) -> str:
-        """Save single message synchronously"""
-        if not self._initialized:
-            logger.error("Database not initialized")
-            return ""
-
-        try:
-            future = self._submit_async_task(self._async_save_message(message_dict, user_id, conversation_id))
-            return future.result(timeout=10)
-        except Exception as e:
-            logger.error(f"💥 Error saving message: {e}")
-            return ""
-
     def save_messages(self, messages: List[Dict[str, Any]], user_id: str = "default_user") -> bool:
-        """Save multiple messages synchronously"""
+        """Save messages synchronously"""
         if not self._initialized:
-            logger.error("Database not initialized")
+            logger.warning("Database not initialized, cannot save messages")
             return False
 
         try:
-            future = self._submit_async_task(self._async_save_messages(messages, user_id))
-            return future.result(timeout=15)
+            self._ensure_user(user_id)
+            conversation_id = self._get_or_create_default_conversation(user_id)
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    # Clear existing messages for this conversation
+                    cur.execute("DELETE FROM messages WHERE conversation_id = %s", (conversation_id,))
+
+                    # Insert all messages
+                    for message_dict in messages:
+                        message_id = str(uuid.uuid4())
+                        cur.execute("""
+                            INSERT INTO messages (
+                                id, conversation_id, role, content, timestamp, created_at,
+                                response_time, model_used, tokens_used, sources, cypher_query,
+                                linked_entities, info, error_info
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            message_id, conversation_id, message_dict["role"], message_dict["content"],
+                            message_dict["timestamp"], datetime.utcnow(),
+                            message_dict.get("response_time"), message_dict.get("model_used"),
+                            message_dict.get("tokens_used"),
+                            json.dumps(message_dict.get("sources")) if message_dict.get("sources") else None,
+                            message_dict.get("cypher_query"),
+                            json.dumps(message_dict.get("linked_entities")) if message_dict.get(
+                                "linked_entities") else None,
+                            json.dumps(message_dict.get("info")) if message_dict.get("info") else None,
+                            message_dict.get("error_info")
+                        ))
+
+                    # Update conversation
+                    cur.execute(
+                        "UPDATE conversations SET message_count = %s, updated_at = %s WHERE id = %s",
+                        (len(messages), datetime.utcnow(), conversation_id)
+                    )
+
+                    conn.commit()
+
+                logger.info(f"💾 Saved {len(messages)} messages to sync database")
+                return True
+
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                self._put_connection(conn)
+
         except Exception as e:
             logger.error(f"💥 Error saving messages: {e}")
             return False
 
-    def get_conversations(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
-        """Get conversations synchronously"""
+    def save_message(self, message_dict: Dict[str, Any], user_id: str = "default_user") -> str:
+        """Save single message synchronously"""
         if not self._initialized:
-            logger.error("Database not initialized")
-            return []
+            logger.warning("Database not initialized, cannot save message")
+            return ""
 
         try:
-            future = self._submit_async_task(self._async_get_conversations(user_id))
-            return future.result(timeout=10)
-        except Exception as e:
-            logger.error(f"💥 Error getting conversations: {e}")
-            return []
+            self._ensure_user(user_id)
+            conversation_id = self._get_or_create_default_conversation(user_id)
 
-    # ==========================================================================
-    # ASYNC IMPLEMENTATION METHODS
-    # ==========================================================================
-
-    async def _async_load_messages(self, user_id: str, conversation_id: str = None) -> List[Dict[str, Any]]:
-        """Load messages async implementation"""
-        try:
-            # Ensure user exists
-            await self._ensure_user(user_id)
-
-            # Get conversation ID
-            if conversation_id is None:
-                conversation_id = await self._get_or_create_default_conversation(user_id)
-
-            # Load messages
-            query = """
-            SELECT role, content, timestamp, response_time, model_used, tokens_used,
-                   sources, cypher_query, linked_entities, info, error_info, user_rating, user_feedback
-            FROM messages 
-            WHERE conversation_id = $1 
-            ORDER BY created_at ASC
-            """
-
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(query, conversation_id)
-
-                messages = []
-                for row in rows:
-                    message = {
-                        "role": row['role'],
-                        "content": row['content'],
-                        "timestamp": row['timestamp']
-                    }
-
-                    # Add optional fields
-                    if row['response_time']:
-                        message["response_time"] = row['response_time']
-                    if row['model_used']:
-                        message["model_used"] = row['model_used']
-                    if row['tokens_used']:
-                        message["tokens_used"] = row['tokens_used']
-                    if row['sources']:
-                        message["sources"] = row['sources']
-                    if row['cypher_query']:
-                        message["cypher_query"] = row['cypher_query']
-                    if row['linked_entities']:
-                        message["linked_entities"] = row['linked_entities']
-                    if row['info']:
-                        message["info"] = row['info']
-                    if row['error_info']:
-                        message["error_info"] = row['error_info']
-                    if row['user_rating'] is not None:
-                        message["user_rating"] = row['user_rating']
-                    if row['user_feedback']:
-                        message["user_feedback"] = row['user_feedback']
-
-                    messages.append(message)
-
-                logger.info(f"📚 Loaded {len(messages)} messages from database")
-                return messages
-
-        except Exception as e:
-            logger.error(f"💥 Error loading messages: {e}")
-            return []
-
-    async def _async_save_message(self, message_dict: Dict[str, Any], user_id: str, conversation_id: str = None) -> str:
-        """Save single message async implementation"""
-        try:
-            # Ensure user exists
-            await self._ensure_user(user_id)
-
-            # Get conversation ID
-            if conversation_id is None:
-                conversation_id = await self._get_or_create_default_conversation(user_id)
-
-            # Insert message
             message_id = str(uuid.uuid4())
-            query = """
-            INSERT INTO messages (
-                id, conversation_id, role, content, timestamp, created_at,
-                response_time, model_used, tokens_used, sources, cypher_query,
-                linked_entities, info, error_info, user_rating, user_feedback
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-            """
 
-            async with self._pool.acquire() as conn:
-                await conn.execute(
-                    query,
-                    message_id,
-                    conversation_id,
-                    message_dict["role"],
-                    message_dict["content"],
-                    message_dict["timestamp"],
-                    datetime.utcnow(),
-                    message_dict.get("response_time"),
-                    message_dict.get("model_used"),
-                    message_dict.get("tokens_used"),
-                    json.dumps(message_dict.get("sources")) if message_dict.get("sources") else None,
-                    message_dict.get("cypher_query"),
-                    json.dumps(message_dict.get("linked_entities")) if message_dict.get("linked_entities") else None,
-                    json.dumps(message_dict.get("info")) if message_dict.get("info") else None,
-                    message_dict.get("error_info"),
-                    message_dict.get("user_rating"),
-                    message_dict.get("user_feedback")
-                )
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO messages (
+                            id, conversation_id, role, content, timestamp, created_at,
+                            response_time, model_used, error_info
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        message_id, conversation_id, message_dict["role"], message_dict["content"],
+                        message_dict["timestamp"], datetime.utcnow(),
+                        message_dict.get("response_time"), message_dict.get("model_used"),
+                        message_dict.get("error_info")
+                    ))
 
-                # Update conversation message count
-                await conn.execute(
-                    "UPDATE conversations SET message_count = message_count + 1, updated_at = $1 WHERE id = $2",
-                    datetime.utcnow(), conversation_id
-                )
+                    cur.execute(
+                        "UPDATE conversations SET message_count = message_count + 1, updated_at = %s WHERE id = %s",
+                        (datetime.utcnow(), conversation_id)
+                    )
 
-            logger.debug(f"➕ Added message to conversation {conversation_id}")
-            return conversation_id
+                    conn.commit()
+
+                logger.debug(f"➕ Added message to sync database")
+                return conversation_id
+
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                self._put_connection(conn)
 
         except Exception as e:
             logger.error(f"💥 Error saving message: {e}")
             raise
 
-    async def _async_save_messages(self, messages: List[Dict[str, Any]], user_id: str) -> bool:
-        """Save multiple messages async implementation"""
-        try:
-            # Ensure user exists
-            await self._ensure_user(user_id)
-
-            # Get or create conversation
-            conversation_id = await self._get_or_create_default_conversation(user_id)
-
-            # Clear existing messages
-            async with self._pool.acquire() as conn:
-                await conn.execute("DELETE FROM messages WHERE conversation_id = $1", conversation_id)
-
-                # Insert all messages
-                for message_dict in messages:
-                    message_id = str(uuid.uuid4())
-                    await conn.execute("""
-                        INSERT INTO messages (
-                            id, conversation_id, role, content, timestamp, created_at,
-                            response_time, model_used, tokens_used, sources, cypher_query,
-                            linked_entities, info, error_info, user_rating, user_feedback
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-                    """,
-                                       message_id,
-                                       conversation_id,
-                                       message_dict["role"],
-                                       message_dict["content"],
-                                       message_dict["timestamp"],
-                                       datetime.utcnow(),
-                                       message_dict.get("response_time"),
-                                       message_dict.get("model_used"),
-                                       message_dict.get("tokens_used"),
-                                       json.dumps(message_dict.get("sources")) if message_dict.get("sources") else None,
-                                       message_dict.get("cypher_query"),
-                                       json.dumps(message_dict.get("linked_entities")) if message_dict.get(
-                                           "linked_entities") else None,
-                                       json.dumps(message_dict.get("info")) if message_dict.get("info") else None,
-                                       message_dict.get("error_info"),
-                                       message_dict.get("user_rating"),
-                                       message_dict.get("user_feedback")
-                                       )
-
-                # Update conversation
-                await conn.execute(
-                    "UPDATE conversations SET message_count = $1, updated_at = $2 WHERE id = $3",
-                    len(messages), datetime.utcnow(), conversation_id
-                )
-
-            logger.info(f"💾 Saved {len(messages)} messages to database")
-            return True
-
-        except Exception as e:
-            logger.error(f"💥 Error saving messages: {e}")
-            return False
-
-    async def _async_get_conversations(self, user_id: str) -> List[Dict[str, Any]]:
-        """Get conversations async implementation"""
-        try:
-            query = """
-            SELECT id, title, created_at, updated_at, message_count
-            FROM conversations 
-            WHERE user_id = $1 AND is_archived = FALSE
-            ORDER BY updated_at DESC
-            LIMIT 50
-            """
-
-            async with self._pool.acquire() as conn:
-                rows = await conn.fetch(query, user_id)
-
-                conversations = []
-                for row in rows:
-                    conversations.append({
-                        "id": str(row['id']),
-                        "title": row['title'],
-                        "created_at": row['created_at'].isoformat(),
-                        "updated_at": row['updated_at'].isoformat(),
-                        "message_count": row['message_count']
-                    })
-
-                return conversations
-
-        except Exception as e:
-            logger.error(f"💥 Error getting conversations: {e}")
-            return []
-
-    async def _ensure_user(self, user_id: str):
+    def _ensure_user(self, user_id: str):
         """Ensure user exists"""
         try:
-            async with self._pool.acquire() as conn:
-                # Check if user exists
-                result = await conn.fetchval("SELECT id FROM users WHERE username = $1", user_id)
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM users WHERE username = %s", (user_id,))
+                    result = cur.fetchone()
 
-                if not result:
-                    # Create user
-                    await conn.execute(
-                        "INSERT INTO users (username, email) VALUES ($1, $2) ON CONFLICT (username) DO NOTHING",
-                        user_id, f"{user_id}@example.com"
-                    )
-                    logger.info(f"➕ Created user: {user_id}")
-                else:
-                    # Update last active
-                    await conn.execute(
-                        "UPDATE users SET last_active = $1 WHERE username = $2",
-                        datetime.utcnow(), user_id
-                    )
+                    if not result:
+                        cur.execute(
+                            "INSERT INTO users (username, email) VALUES (%s, %s) ON CONFLICT (username) DO NOTHING",
+                            (user_id, f"{user_id}@example.com")
+                        )
+                        conn.commit()
+                        logger.info(f"➕ Created user: {user_id}")
+
+            finally:
+                self._put_connection(conn)
 
         except Exception as e:
             logger.warning(f"Could not ensure user {user_id}: {e}")
 
-    async def _get_or_create_default_conversation(self, user_id: str) -> str:
+    def _get_or_create_default_conversation(self, user_id: str) -> str:
         """Get or create default conversation"""
         try:
-            async with self._pool.acquire() as conn:
-                # Try to get existing conversation
-                result = await conn.fetchval(
-                    "SELECT id FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1",
-                    user_id
-                )
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id FROM conversations WHERE user_id = %s ORDER BY updated_at DESC LIMIT 1",
+                        (user_id,)
+                    )
+                    result = cur.fetchone()
 
-                if result:
-                    return str(result)
-                else:
-                    # Create new conversation
-                    conversation_id = str(uuid.uuid4())
-                    title = f"Chat - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    if result:
+                        return str(result[0])
+                    else:
+                        conversation_id = str(uuid.uuid4())
+                        title = f"Chat - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
-                    await conn.execute("""
-                        INSERT INTO conversations (id, user_id, title, created_at, updated_at)
-                        VALUES ($1, $2, $3, $4, $5)
-                    """, conversation_id, user_id, title, datetime.utcnow(), datetime.utcnow())
+                        cur.execute("""
+                            INSERT INTO conversations (id, user_id, title, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (conversation_id, user_id, title, datetime.utcnow(), datetime.utcnow()))
 
-                    logger.info(f"➕ Created conversation: {conversation_id}")
-                    return conversation_id
+                        conn.commit()
+                        logger.info(f"➕ Created conversation: {conversation_id}")
+                        return conversation_id
+
+            finally:
+                self._put_connection(conn)
 
         except Exception as e:
             logger.error(f"Error getting/creating conversation: {e}")
             raise
 
     def close(self):
-        """Close database connections"""
-        if self._loop and self._pool:
-            try:
-                future = self._submit_async_task(self._pool.close())
-                future.result(timeout=5)
-            except:
-                pass
+        """Close the database connection pool"""
+        try:
+            if self._pool:
+                self._pool.closeall()
+                logger.info("🔒 Database connection pool closed")
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
 
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+    @property
+    def is_initialized(self) -> bool:
+        """Check if database is initialized"""
+        return self._initialized
 
-        if self._executor:
-            self._executor.shutdown(wait=True)
-
-
-# ==========================================================================
-# SIMPLE CHAT SERVICE USING SYNC DATABASE
-# ==========================================================================
 
 class SyncChatService:
-    """Simple chat service using sync database manager"""
+    """Simple chat service using sync database"""
 
     def __init__(self, db_manager: SyncDatabaseManager):
         self.db = db_manager
 
     def load_chat_history(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
-        """Load chat history"""
         return self.db.load_messages(user_id)
 
     def save_chat_history(self, messages: List[Dict[str, Any]], user_id: str = "default_user") -> bool:
-        """Save chat history"""
         return self.db.save_messages(messages, user_id)
 
     def add_message(self, message_dict: Dict[str, Any], user_id: str = "default_user") -> str:
-        """Add single message"""
         return self.db.save_message(message_dict, user_id)
 
-    def get_conversations(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
-        """Get conversations"""
-        return self.db.get_conversations(user_id)
-
-
-# ==========================================================================
-# FACTORY FUNCTION
-# ==========================================================================
 
 def create_sync_chat_service(config: Dict[str, Any]) -> SyncChatService:
     """Create sync chat service"""

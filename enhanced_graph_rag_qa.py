@@ -1,4 +1,4 @@
-# enhanced_graph_rag_qa.py - COMPLETE INTEGRATION LAYER WITH MULTI-PROVIDER LLM SUPPORT
+# enhanced_graph_rag_qa.py - COMPLETE INTEGRATION LAYER WITH MULTI-PROVIDER LLM SUPPORT AND CYPHER CLEANING
 
 import logging
 import time
@@ -117,6 +117,82 @@ class EnhancedGraphRAGQA(GraphRAGQA):
             logger.warning(f"Could not import main LLM configuration manager: {e}")
             self.llm_managers = {}
 
+    def clean_cypher_query(self, cypher_text: str) -> str:
+        """
+        FIXED: Clean LLM-generated Cypher query to remove markdown formatting and ensure pure Cypher.
+
+        Args:
+            cypher_text: Raw output from LLM that may contain markdown
+
+        Returns:
+            Clean Cypher query ready for Neo4j execution
+        """
+        if not cypher_text or not isinstance(cypher_text, str):
+            logger.warning("Empty or invalid Cypher input")
+            return ""
+
+        original_cypher = cypher_text
+        logger.debug(f"🔧 Cleaning Cypher input: {original_cypher[:100]}...")
+
+        # Remove markdown code blocks
+        cypher_text = cypher_text.replace('```cypher\n', '').replace('```cypher', '')
+        cypher_text = cypher_text.replace('\n```', '').replace('```', '')
+
+        # Remove any leading/trailing whitespace
+        cypher_text = cypher_text.strip()
+
+        # Remove quotes if the entire query is wrapped in quotes
+        if ((cypher_text.startswith('"') and cypher_text.endswith('"')) or
+                (cypher_text.startswith("'") and cypher_text.endswith("'"))):
+            cypher_text = cypher_text[1:-1]
+
+        # Remove any remaining backticks
+        cypher_text = cypher_text.replace('`', '')
+
+        # Ensure the query doesn't start with explanatory text
+        lines = cypher_text.split('\n')
+        cleaned_lines = []
+
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('//') or line.startswith('#'):
+                continue
+            # Skip explanatory text - look for actual Cypher keywords
+            if any(line.upper().startswith(keyword) for keyword in [
+                'MATCH', 'RETURN', 'WHERE', 'WITH', 'CREATE', 'MERGE', 'DELETE',
+                'SET', 'REMOVE', 'FOREACH', 'CALL', 'UNION', 'OPTIONAL', 'UNWIND'
+            ]):
+                cleaned_lines.append(line)
+            elif cleaned_lines:  # Only add non-keyword lines if we've already started the query
+                cleaned_lines.append(line)
+
+        result = '\n'.join(cleaned_lines).strip()
+
+        # Final validation - ensure we have a valid Cypher query
+        if not result:
+            logger.warning("Cypher cleaning resulted in empty query")
+            return ""
+
+        # Basic validation - should start with a Cypher keyword
+        first_word = result.split()[0].upper() if result.split() else ""
+        valid_start_keywords = [
+            'MATCH', 'RETURN', 'WITH', 'CREATE', 'MERGE', 'DELETE',
+            'SET', 'REMOVE', 'CALL', 'UNION', 'OPTIONAL', 'UNWIND'
+        ]
+
+        if first_word not in valid_start_keywords:
+            logger.warning(f"Cypher query doesn't start with valid keyword: {first_word}")
+            # Try to find the first valid line
+            for line in result.split('\n'):
+                first_word_line = line.strip().split()[0].upper() if line.strip().split() else ""
+                if first_word_line in valid_start_keywords:
+                    result = line.strip()
+                    break
+
+        logger.info(f"🔧 Original: {original_cypher[:50]}... → ✅ Cleaned: {result}")
+        return result
+
     def _enhanced_llm_call(self, task_name: str, prompt: str, system_prompt: str = None, **kwargs) -> str:
         """
         ENHANCED: Enhanced LLM call with multi-provider support.
@@ -164,7 +240,7 @@ class EnhancedGraphRAGQA(GraphRAGQA):
 
     def _generate_cypher_query(self, question: str, linked_entities: Dict[str, Optional[str]]) -> Optional[str]:
         """
-        ENHANCED: Cypher generation with multi-provider LLM support AND universal patterns.
+        FIXED: Cypher generation with multi-provider LLM support AND Cypher cleaning.
         This overrides the base method but maintains full compatibility.
         """
 
@@ -184,14 +260,17 @@ class EnhancedGraphRAGQA(GraphRAGQA):
                         # Store metadata for later use
                         self._last_universal_result = adaptive_result
 
-                        return adaptive_result['cypher_query']
+                        # FIXED: Clean the universal pattern cypher too
+                        clean_cypher = self.clean_cypher_query(adaptive_result['cypher_query'])
+                        if clean_cypher:
+                            return clean_cypher
                     else:
                         logger.debug(f"Universal pattern confidence too low: {confidence:.3f}")
 
             except Exception as e:
                 logger.warning(f"Universal pattern generation failed: {e}")
 
-        # ENHANCED: Try multi-provider LLM for Cypher generation
+        # FIXED: Try multi-provider LLM for Cypher generation with proper cleaning
         if self.enable_multi_provider_llm and NEW_LLM_SYSTEM_AVAILABLE:
             try:
                 logger.debug("Attempting multi-provider LLM Cypher generation")
@@ -206,29 +285,52 @@ class EnhancedGraphRAGQA(GraphRAGQA):
                 Question: {question}
                 {entity_context}
 
-                Please provide only the Cypher query without any additional text.
+                CRITICAL REQUIREMENTS:
+                1. Return ONLY pure Cypher code
+                2. NO markdown formatting (no ```cypher or ```)
+                3. NO explanations or comments
+                4. NO quotes around the entire query
+                5. Start directly with Cypher keywords (MATCH, RETURN, etc.)
+
+                Example correct response:
+                MATCH (n:Entity) WHERE n.name = "example" RETURN n
+
+                Provide only the Cypher query without any additional text.
                 """
 
-                system_prompt = """You are a Neo4j Cypher query expert. Generate accurate and efficient Cypher queries based on the given question and entity context."""
+                system_prompt = """You are a Neo4j Cypher query expert. Generate ONLY pure Cypher code without any markdown formatting, explanations, or additional text. The query should be ready to execute directly in Neo4j."""
 
-                cypher_response = self._enhanced_llm_call(
+                raw_cypher_response = self._enhanced_llm_call(
                     task_name='cypher_generation',
                     prompt=cypher_prompt,
                     system_prompt=system_prompt,
                     max_tokens=500,
-                    temperature=0.1
+                    temperature=0.1  # Low temperature for consistent formatting
                 )
 
-                if cypher_response and cypher_response.strip():
-                    logger.info("Multi-provider LLM Cypher generation successful")
-                    return cypher_response.strip()
+                if raw_cypher_response and raw_cypher_response.strip():
+                    # FIXED: Clean the generated Cypher
+                    clean_cypher = self.clean_cypher_query(raw_cypher_response)
+
+                    if clean_cypher:
+                        logger.info("Multi-provider LLM Cypher generation successful")
+                        return clean_cypher
+                    else:
+                        logger.warning("Multi-provider LLM generated Cypher but cleaning failed")
 
             except Exception as e:
                 logger.warning(f"Multi-provider LLM Cypher generation failed: {e}")
 
         # Fallback to original method
         logger.debug("Using base GraphRAG Cypher generation")
-        return super()._generate_cypher_query(question, linked_entities)
+        base_cypher = super()._generate_cypher_query(question, linked_entities)
+
+        # FIXED: Also clean the base system's cypher output
+        if base_cypher:
+            clean_base_cypher = self.clean_cypher_query(base_cypher)
+            return clean_base_cypher if clean_base_cypher else base_cypher
+
+        return base_cypher
 
     def _link_entities(self, question: str) -> Dict[str, Optional[str]]:
         """
@@ -657,6 +759,8 @@ def upgrade_existing_graphrag(existing_qa_engine) -> EnhancedGraphRAGQA:
 
 
 if __name__ == "__main__":
-    print("Enhanced GraphRAG QA Integration Layer with Multi-Provider LLM Support")
-    print("Provides universal pattern support AND multi-provider LLM with full backward compatibility")
+    print("Enhanced GraphRAG QA Integration Layer with Multi-Provider LLM Support and Cypher Cleaning")
+    print("✅ FIXED: Cypher query generation now properly cleans markdown formatting")
+    print("✅ ENHANCED: Multi-provider LLM support with fallback mechanisms")
+    print("✅ ENHANCED: Universal pattern support with industry detection")
     print("Ready for integration with your existing system!")

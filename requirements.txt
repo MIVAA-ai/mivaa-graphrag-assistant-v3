@@ -90,3 +90,4 @@ slowapi>=0.1.9                   # For API rate limiting
 redis>=5.0.0                     # For caching and sessions
 
 asyncpg>=0.29.0
+psycopg2-binary==2.9.7
