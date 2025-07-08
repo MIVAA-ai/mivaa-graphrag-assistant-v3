@@ -1,5 +1,3 @@
-# .dockerignore - Exclude files from Docker build context
-
 # Python cache and builds
 __pycache__/
 *.py[cod]
@@ -22,6 +20,7 @@ wheels/
 
 # Virtual environments
 .env
+!.env.example
 .venv
 env/
 venv/
@@ -53,7 +52,7 @@ tmp/
 chat_history.json
 graph_visualization.html
 
-# Data directories (empty them for Docker)
+# Data directories
 data/*
 !data/.gitkeep
 chroma_db_pipeline/*

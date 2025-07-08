@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: graphrag-api
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
@@ -56,6 +58,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: graphrag-ui
+    env_file:
+      - .env
     ports:
       - "8501:8501"
     environment:

@@ -1,4 +1,4 @@
-# src/chat/sync_database.py - PURE SYNC VERSION using psycopg2
+# src/chat/sync_database.py - COMPLETE VERSION with Conversation Management
 import logging
 import uuid
 import json
@@ -133,6 +133,8 @@ class SyncDatabaseManager:
 
         CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations(user_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_conversations_title_search ON conversations USING gin (title gin_trgm_ops);
+        CREATE INDEX IF NOT EXISTS idx_messages_content_search ON messages USING gin (content gin_trgm_ops);
 
         INSERT INTO users (username, email) VALUES ('default_user', 'default@example.com') ON CONFLICT (username) DO NOTHING;
         """
@@ -149,6 +151,310 @@ class SyncDatabaseManager:
             raise
         finally:
             self._put_connection(conn)
+
+    # ============================================================================
+    # CONVERSATION MANAGEMENT METHODS
+    # ============================================================================
+
+    def get_conversations(self, user_id: str = "default_user", limit: int = 10) -> List[Dict[str, Any]]:
+        """Get conversations for user from database"""
+        if not self._initialized:
+            logger.warning("Database not initialized, returning empty list")
+            return []
+
+        try:
+            query = """
+            SELECT c.id, c.title, c.created_at, c.updated_at, c.message_count, c.is_archived,
+                   m.content as last_message_preview
+            FROM conversations c
+            LEFT JOIN LATERAL (
+                SELECT content 
+                FROM messages 
+                WHERE conversation_id = c.id 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            ) m ON true
+            WHERE c.user_id = %s AND c.is_archived = FALSE
+            ORDER BY c.updated_at DESC
+            LIMIT %s
+            """
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(query, (user_id, limit))
+                    rows = cur.fetchall()
+
+                    conversations = []
+                    for row in rows:
+                        conv = {
+                            "id": str(row['id']),
+                            "title": row['title'],
+                            "created_at": row['created_at'].isoformat(),
+                            "updated_at": row['updated_at'].isoformat(),
+                            "message_count": row['message_count'],
+                            "is_archived": row['is_archived'],
+                            "last_message_preview": row['last_message_preview'][:100] + "..." if row[
+                                                                                                     'last_message_preview'] and len(
+                                row['last_message_preview']) > 100 else row['last_message_preview']
+                        }
+                        conversations.append(conv)
+
+                    logger.info(f"📚 Retrieved {len(conversations)} conversations for user {user_id}")
+                    return conversations
+
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error getting conversations: {e}")
+            return []
+
+    def create_conversation(self, title: str, user_id: str = "default_user") -> str:
+        """Create a new conversation"""
+        if not self._initialized:
+            logger.warning("Database not initialized, cannot create conversation")
+            return ""
+
+        try:
+            self._ensure_user(user_id)
+            conversation_id = str(uuid.uuid4())
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO conversations (id, user_id, title, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (conversation_id, user_id, title, datetime.utcnow(), datetime.utcnow()))
+
+                    conn.commit()
+                    logger.info(f"➕ Created conversation: {conversation_id}")
+                    return conversation_id
+
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error creating conversation: {e}")
+            raise
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation and all its messages"""
+        if not self._initialized:
+            logger.warning("Database not initialized, cannot delete conversation")
+            return False
+
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    # Delete conversation (messages will be cascade deleted)
+                    cur.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+                    rows_affected = cur.rowcount
+                    conn.commit()
+
+                    if rows_affected > 0:
+                        logger.info(f"🗑️ Deleted conversation: {conversation_id}")
+                        return True
+                    else:
+                        logger.warning(f"⚠️ Conversation not found: {conversation_id}")
+                        return False
+
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error deleting conversation: {e}")
+            return False
+
+    def update_conversation_title(self, conversation_id: str, title: str) -> bool:
+        """Update conversation title"""
+        if not self._initialized:
+            logger.warning("Database not initialized, cannot update conversation")
+            return False
+
+        try:
+            conn = self._get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE conversations 
+                        SET title = %s, updated_at = %s 
+                        WHERE id = %s
+                    """, (title, datetime.utcnow(), conversation_id))
+
+                    rows_affected = cur.rowcount
+                    conn.commit()
+
+                    if rows_affected > 0:
+                        logger.info(f"✏️ Updated conversation title: {conversation_id}")
+                        return True
+                    else:
+                        logger.warning(f"⚠️ Conversation not found: {conversation_id}")
+                        return False
+
+            except Exception as e:
+                conn.rollback()
+                raise
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error updating conversation title: {e}")
+            return False
+
+    # ============================================================================
+    # SEARCH METHODS
+    # ============================================================================
+
+    def search_conversations(self, user_id: str, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search conversations by title and content"""
+        if not self._initialized:
+            logger.warning("Database not initialized, returning empty search results")
+            return []
+
+        try:
+            search_query = """
+            SELECT DISTINCT c.id, c.title, c.created_at, c.updated_at, c.message_count,
+                   ts_rank(to_tsvector('english', c.title), plainto_tsquery('english', %s)) as title_rank,
+                   CASE 
+                       WHEN c.title ILIKE %s THEN 1.0
+                       ELSE 0.0
+                   END as exact_match
+            FROM conversations c
+            LEFT JOIN messages m ON c.id = m.conversation_id
+            WHERE c.user_id = %s 
+            AND c.is_archived = FALSE
+            AND (
+                c.title ILIKE %s 
+                OR m.content ILIKE %s
+                OR to_tsvector('english', c.title) @@ plainto_tsquery('english', %s)
+                OR to_tsvector('english', m.content) @@ plainto_tsquery('english', %s)
+            )
+            ORDER BY exact_match DESC, title_rank DESC, c.updated_at DESC
+            LIMIT %s
+            """
+
+            like_query = f"%{query}%"
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(search_query, (
+                        query, like_query, user_id, like_query, like_query, query, query, limit
+                    ))
+                    rows = cur.fetchall()
+
+                    conversations = []
+                    for row in rows:
+                        conv = {
+                            "id": str(row['id']),
+                            "title": row['title'],
+                            "created_at": row['created_at'].isoformat(),
+                            "updated_at": row['updated_at'].isoformat(),
+                            "message_count": row['message_count'],
+                            "relevance_score": float(row.get('title_rank', 0))
+                        }
+                        conversations.append(conv)
+
+                    logger.info(f"🔍 Found {len(conversations)} conversations matching '{query}'")
+                    return conversations
+
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error searching conversations: {e}")
+            return []
+
+    def search_messages(self, user_id: str, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Search messages by content"""
+        if not self._initialized:
+            logger.warning("Database not initialized, returning empty search results")
+            return []
+
+        try:
+            search_query = """
+            SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
+                   c.title as conversation_title,
+                   ts_rank(to_tsvector('english', m.content), plainto_tsquery('english', %s)) as content_rank
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.user_id = %s
+            AND c.is_archived = FALSE
+            AND (
+                m.content ILIKE %s
+                OR to_tsvector('english', m.content) @@ plainto_tsquery('english', %s)
+            )
+            ORDER BY content_rank DESC, m.created_at DESC
+            LIMIT %s
+            """
+
+            like_query = f"%{query}%"
+
+            conn = self._get_connection()
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(search_query, (query, user_id, like_query, query, limit))
+                    rows = cur.fetchall()
+
+                    messages = []
+                    for row in rows:
+                        message = {
+                            "id": str(row['id']),
+                            "conversation_id": str(row['conversation_id']),
+                            "role": row['role'],
+                            "content": row['content'],
+                            "created_at": row['created_at'].isoformat(),
+                            "conversation_title": row['conversation_title'],
+                            "relevance_score": float(row.get('content_rank', 0)),
+                            "highlight_snippet": self._create_highlight_snippet(row['content'], query)
+                        }
+                        messages.append(message)
+
+                    logger.info(f"🔍 Found {len(messages)} messages matching '{query}'")
+                    return messages
+
+            finally:
+                self._put_connection(conn)
+
+        except Exception as e:
+            logger.error(f"💥 Error searching messages: {e}")
+            return []
+
+    def _create_highlight_snippet(self, content: str, query: str, context_length: int = 100) -> str:
+        """Create a highlighted snippet around the search term"""
+        try:
+            content_lower = content.lower()
+            query_lower = query.lower()
+
+            index = content_lower.find(query_lower)
+            if index == -1:
+                return content[:context_length] + "..." if len(content) > context_length else content
+
+            start = max(0, index - context_length // 2)
+            end = min(len(content), index + len(query) + context_length // 2)
+
+            snippet = content[start:end]
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(content):
+                snippet = snippet + "..."
+
+            return snippet
+        except Exception:
+            return content[:context_length] + "..." if len(content) > context_length else content
+
+    # ============================================================================
+    # EXISTING MESSAGE METHODS (UNCHANGED)
+    # ============================================================================
 
     def load_messages(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
         """Load messages synchronously"""
@@ -385,10 +691,14 @@ class SyncDatabaseManager:
 
 
 class SyncChatService:
-    """Simple chat service using sync database"""
+    """Enhanced chat service with conversation management and search"""
 
     def __init__(self, db_manager: SyncDatabaseManager):
         self.db = db_manager
+
+    # ============================================================================
+    # EXISTING METHODS (UNCHANGED)
+    # ============================================================================
 
     def load_chat_history(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
         return self.db.load_messages(user_id)
@@ -398,6 +708,38 @@ class SyncChatService:
 
     def add_message(self, message_dict: Dict[str, Any], user_id: str = "default_user") -> str:
         return self.db.save_message(message_dict, user_id)
+
+    # ============================================================================
+    # NEW CONVERSATION MANAGEMENT METHODS
+    # ============================================================================
+
+    def get_conversations(self, user_id: str = "default_user", limit: int = 10) -> List[Dict[str, Any]]:
+        """Get conversations for user"""
+        return self.db.get_conversations(user_id, limit)
+
+    def create_conversation(self, title: str, user_id: str = "default_user") -> str:
+        """Create a new conversation"""
+        return self.db.create_conversation(title, user_id)
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation"""
+        return self.db.delete_conversation(conversation_id)
+
+    def update_conversation_title(self, conversation_id: str, title: str) -> bool:
+        """Update conversation title"""
+        return self.db.update_conversation_title(conversation_id, title)
+
+    # ============================================================================
+    # NEW SEARCH METHODS
+    # ============================================================================
+
+    def search_conversations(self, query: str, user_id: str = "default_user") -> List[Dict[str, Any]]:
+        """Search conversations"""
+        return self.db.search_conversations(user_id, query)
+
+    def search_messages(self, query: str, user_id: str = "default_user") -> List[Dict[str, Any]]:
+        """Search messages"""
+        return self.db.search_messages(user_id, query)
 
 
 def create_sync_chat_service(config: Dict[str, Any]) -> SyncChatService:
