@@ -34,6 +34,7 @@ services:
       - ./logs:/app/logs
       - ./chroma_db_pipeline:/app/chroma_db_pipeline
       - ./ocr_outputs:/app/ocr_outputs
+      - ./graphrag_cache:/app/graphrag_cache
       - ./config.toml:/app/config.toml:ro
     depends_on:
       postgres:
@@ -88,6 +89,7 @@ services:
       - ./logs:/app/logs
       - ./chroma_db_pipeline:/app/chroma_db_pipeline
       - ./ocr_outputs:/app/ocr_outputs
+      - ./graphrag_cache:/app/graphrag_cache
       - ./config.toml:/app/config.toml:ro
     depends_on:
       postgres:
