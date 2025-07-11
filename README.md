@@ -87,7 +87,7 @@ MISTRAL_API_KEY=your_mistral_key
 
 ### 3. Build & Launch the Platform
 ```bash
-# Build the Docker images (first time setup)
+# Build the Docker images (first time setup) (can take upto 20-30 mins)
 docker-compose build
 
 # Start all services
