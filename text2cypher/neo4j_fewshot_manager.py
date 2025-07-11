@@ -64,8 +64,8 @@ PROPERTY_EMBEDDING = "embedding"
 PROPERTY_CREATED = "created"
 
 # OPTIMIZED: Performance configuration
-DEFAULT_LLM_TIMEOUT = 5  # 5 second timeout for LLM calls
-FAST_LLM_TIMEOUT = 3  # 3 second timeout for simple operations
+DEFAULT_LLM_TIMEOUT = 10  # 5 second timeout for LLM calls
+FAST_LLM_TIMEOUT = 6  # 3 second timeout for simple operations
 MAX_EXAMPLE_GENERATION = 2  # Reduced from 3 to 2 examples
 VALIDATION_TIMEOUT = 3  # 3 second timeout for validation
 

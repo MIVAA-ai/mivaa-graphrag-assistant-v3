@@ -37,8 +37,8 @@ from graph_rag_qa import GraphRAGQA
 logger = logging.getLogger(__name__)
 
 # OPTIMIZED: Performance configuration constants
-DEFAULT_LLM_TIMEOUT = 8  # 8 second max for LLM calls
-FAST_LLM_TIMEOUT = 5  # 5 second max for simple operations
+DEFAULT_LLM_TIMEOUT = 12  # 8 second max for LLM calls
+FAST_LLM_TIMEOUT = 8  # 5 second max for simple operations
 MAX_REVISION_ATTEMPTS = 2  # Reduced from 3 to 2
 VECTOR_SEARCH_TIMEOUT = 3  # 3 second max for vector search
 CYPHER_EXECUTION_TIMEOUT = 5  # 5 second max for Neo4j queries
@@ -202,7 +202,11 @@ class EnhancedGraphRAGQA(GraphRAGQA):
         start_time = time.time()
 
         # OPTIMIZED: Use task-specific or default timeout
-        actual_timeout = timeout or (FAST_LLM_TIMEOUT if self.fast_mode else DEFAULT_LLM_TIMEOUT)
+        # Special handling for entity linking which needs more time
+        if task_name == 'entity_linking':
+            actual_timeout = timeout or 15  # 15 seconds for entity linking
+        else:
+            actual_timeout = timeout or (FAST_LLM_TIMEOUT if self.fast_mode else DEFAULT_LLM_TIMEOUT)
 
         # Try enhanced system first
         if (self.enable_multi_provider_llm and
