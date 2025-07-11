@@ -1097,7 +1097,7 @@ Instructions:
                 logger.error(f"Failed to store few-shot example: {e}")
 
         # Step 5: Vector search
-        vector_top_k = self.llm_config_extra.get("vector_search_top_k", 5)
+        vector_top_k = self.llm_config_extra.get("vector_search_top_k", 3)
         similar_chunks = self._query_vector_db(question, top_k=vector_top_k)
 
         # Step 6: Format context and generate answer
